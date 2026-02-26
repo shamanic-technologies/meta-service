@@ -40,12 +40,12 @@ router.get("/accounts", async (req, res) => {
     return;
   }
 
-  const { appId, clerkOrgId, activeOnly } = parsed.data;
+  const { appId, orgId, activeOnly } = parsed.data;
 
   // Find connections for this app/org
   const conditions = [eq(metaConnections.appId, appId)];
-  if (clerkOrgId) {
-    conditions.push(eq(metaConnections.clerkOrgId, clerkOrgId));
+  if (orgId) {
+    conditions.push(eq(metaConnections.orgId, orgId));
   }
 
   const connections = await db.query.metaConnections.findMany({

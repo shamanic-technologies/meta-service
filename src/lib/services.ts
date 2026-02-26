@@ -26,11 +26,11 @@ async function runsRequest<T>(
 }
 
 export async function createRun(params: {
-  clerkOrgId: string;
+  orgId: string;
   appId: string;
   serviceName: string;
   taskName: string;
-  clerkUserId?: string;
+  userId?: string;
   brandId?: string;
   campaignId?: string;
 }): Promise<{ id: string }> {
@@ -166,17 +166,20 @@ export async function sendEmail(params: {
   appId: string;
   eventType: string;
   recipientEmail?: string;
-  clerkOrgId?: string;
-  clerkUserId?: string;
+  orgId?: string;
+  userId?: string;
   metadata?: Record<string, unknown>;
 }): Promise<void> {
+  // Map orgId/userId to clerkOrgId/clerkUserId for email service compat
+  const { orgId, userId, ...rest } = params;
+  const body = { ...rest, clerkOrgId: orgId, clerkUserId: userId };
   const response = await fetch(`${EMAIL_SERVICE_URL()}/send`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "x-api-key": EMAIL_SERVICE_API_KEY(),
     },
-    body: JSON.stringify(params),
+    body: JSON.stringify(body),
   });
   if (!response.ok) {
     const text = await response.text().catch(() => "");

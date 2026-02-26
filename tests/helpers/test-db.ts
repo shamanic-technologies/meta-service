@@ -20,7 +20,7 @@ export async function insertTestConnection(
     .insert(metaConnections)
     .values({
       appId: overrides.appId ?? "test-app",
-      clerkOrgId: overrides.clerkOrgId ?? "org-test",
+      orgId: overrides.orgId ?? "org-test",
       label: overrides.label ?? "Test Connection",
       metaUserId: overrides.metaUserId ?? `meta-user-${Date.now()}`,
       metaUserName: overrides.metaUserName ?? "Test User",

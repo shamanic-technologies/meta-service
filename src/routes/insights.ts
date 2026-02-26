@@ -30,7 +30,7 @@ router.get("/insights", async (req, res) => {
   const {
     adAccountId,
     appId,
-    clerkOrgId,
+    orgId,
     level,
     objectId,
     datePreset,
@@ -89,7 +89,7 @@ router.get("/insights", async (req, res) => {
     return;
   }
 
-  if (clerkOrgId && account.connection.clerkOrgId !== clerkOrgId) {
+  if (orgId && account.connection.orgId !== orgId) {
     res.status(404).json({ error: "Ad account not found" });
     return;
   }
@@ -98,7 +98,7 @@ router.get("/insights", async (req, res) => {
   let runId: string | null = null;
   try {
     const run = await createRun({
-      clerkOrgId: clerkOrgId ?? account.connection.clerkOrgId ?? appId,
+      orgId: orgId ?? account.connection.orgId ?? appId,
       appId,
       serviceName: "meta-service",
       taskName: "get-insights",

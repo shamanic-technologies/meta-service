@@ -70,7 +70,7 @@ registry.registerPath({
 export const AuthorizeQuerySchema = z
   .object({
     appId: z.string().min(1),
-    clerkOrgId: z.string().optional(),
+    orgId: z.string().optional(),
     redirectUri: z.string().url(),
     label: z.string().optional(),
   })
@@ -171,7 +171,7 @@ registry.registerPath({
 export const ConnectionsQuerySchema = z
   .object({
     appId: z.string().min(1),
-    clerkOrgId: z.string().optional(),
+    orgId: z.string().optional(),
   })
   .openapi("ConnectionsQuery");
 
@@ -200,7 +200,7 @@ export const ConnectionResponseSchema = z
   .object({
     id: z.string().uuid(),
     appId: z.string(),
-    clerkOrgId: z.string().nullable(),
+    orgId: z.string().nullable(),
     label: z.string().nullable(),
     metaUserId: z.string(),
     metaUserName: z.string().nullable(),
@@ -243,7 +243,7 @@ registry.registerPath({
 export const AccountsQuerySchema = z
   .object({
     appId: z.string().min(1),
-    clerkOrgId: z.string().optional(),
+    orgId: z.string().optional(),
     activeOnly: z.coerce.boolean().default(true),
   })
   .openapi("AccountsQuery");
@@ -344,7 +344,7 @@ export const InsightsQuerySchema = z
   .object({
     adAccountId: z.string().min(1),
     appId: z.string().min(1),
-    clerkOrgId: z.string().optional(),
+    orgId: z.string().optional(),
     level: z
       .enum(["account", "campaign", "adset", "ad"])
       .default("campaign"),
