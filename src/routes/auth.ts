@@ -44,7 +44,7 @@ router.get("/auth/meta/authorize", (req, res) => {
     return;
   }
 
-  const { appId, clerkOrgId, redirectUri, label } = parsed.data;
+  const { appId, orgId, redirectUri, label } = parsed.data;
   const metaAppId = process.env.META_APP_ID;
 
   if (!metaAppId) {
@@ -54,7 +54,7 @@ router.get("/auth/meta/authorize", (req, res) => {
 
   // Encode state as base64 JSON
   const state = Buffer.from(
-    JSON.stringify({ appId, clerkOrgId, redirectUri, label }),
+    JSON.stringify({ appId, orgId, redirectUri, label }),
   ).toString("base64url");
 
   // Build the callback URL — Meta redirects here
@@ -86,7 +86,7 @@ router.get("/auth/meta/callback", async (req, res) => {
   // Decode state
   let stateData: {
     appId: string;
-    clerkOrgId?: string;
+    orgId?: string;
     redirectUri: string;
     label?: string;
   };
@@ -167,7 +167,7 @@ router.get("/auth/meta/callback", async (req, res) => {
       .insert(metaConnections)
       .values({
         appId: stateData.appId,
-        clerkOrgId: stateData.clerkOrgId ?? null,
+        orgId: stateData.orgId ?? null,
         label: stateData.label ?? null,
         metaUserId: meResult.data.id,
         metaUserName: meResult.data.name,

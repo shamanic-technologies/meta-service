@@ -17,11 +17,11 @@ router.get("/connections", async (req, res) => {
     return;
   }
 
-  const { appId, clerkOrgId } = parsed.data;
+  const { appId, orgId } = parsed.data;
 
   const conditions = [eq(metaConnections.appId, appId)];
-  if (clerkOrgId) {
-    conditions.push(eq(metaConnections.clerkOrgId, clerkOrgId));
+  if (orgId) {
+    conditions.push(eq(metaConnections.orgId, orgId));
   }
 
   const connections = await db.query.metaConnections.findMany({
@@ -36,7 +36,7 @@ router.get("/connections", async (req, res) => {
   const result = connections.map((conn) => ({
     id: conn.id,
     appId: conn.appId,
-    clerkOrgId: conn.clerkOrgId,
+    orgId: conn.orgId,
     label: conn.label,
     metaUserId: conn.metaUserId,
     metaUserName: conn.metaUserName,

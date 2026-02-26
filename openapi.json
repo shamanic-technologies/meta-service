@@ -86,7 +86,7 @@
           "appId": {
             "type": "string"
           },
-          "clerkOrgId": {
+          "orgId": {
             "type": "string",
             "nullable": true
           },
@@ -132,7 +132,7 @@
         "required": [
           "id",
           "appId",
-          "clerkOrgId",
+          "orgId",
           "label",
           "metaUserId",
           "metaUserName",
@@ -449,7 +449,7 @@
               "type": "string"
             },
             "required": false,
-            "name": "clerkOrgId",
+            "name": "orgId",
             "in": "query"
           },
           {
@@ -598,7 +598,7 @@
               "type": "string"
             },
             "required": false,
-            "name": "clerkOrgId",
+            "name": "orgId",
             "in": "query"
           }
         ],
@@ -660,7 +660,7 @@
               "type": "string"
             },
             "required": false,
-            "name": "clerkOrgId",
+            "name": "orgId",
             "in": "query"
           },
           {
@@ -824,7 +824,7 @@
               "type": "string"
             },
             "required": false,
-            "name": "clerkOrgId",
+            "name": "orgId",
             "in": "query"
           },
           {

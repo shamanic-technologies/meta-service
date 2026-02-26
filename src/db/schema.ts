@@ -17,7 +17,7 @@ export const metaConnections = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     appId: text("app_id").notNull(),
-    clerkOrgId: text("clerk_org_id"),
+    orgId: text("org_id"),
     label: text("label"),
     metaUserId: text("meta_user_id").notNull(),
     metaUserName: text("meta_user_name"),
@@ -33,7 +33,7 @@ export const metaConnections = pgTable(
   },
   (table) => [
     index("idx_meta_connections_app_id").on(table.appId),
-    index("idx_meta_connections_clerk_org_id").on(table.clerkOrgId),
+    index("idx_meta_connections_org_id").on(table.orgId),
   ],
 );
 
