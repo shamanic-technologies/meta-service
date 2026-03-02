@@ -1,31 +1,16 @@
 import { Router } from "express";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { metaConnections } from "../db/schema.js";
-import { ConnectionsQuerySchema } from "../schemas.js";
 
 const router = Router();
 
-// GET /connections — List connections for an app/org
-router.get("/connections", async (req, res) => {
-  const parsed = ConnectionsQuerySchema.safeParse(req.query);
-  if (!parsed.success) {
-    res.status(400).json({
-      error: "Invalid request",
-      details: parsed.error.flatten(),
-    });
-    return;
-  }
-
-  const { appId, orgId } = parsed.data;
-
-  const conditions = [eq(metaConnections.appId, appId)];
-  if (orgId) {
-    conditions.push(eq(metaConnections.orgId, orgId));
-  }
+// GET /connections — List connections for an org
+router.get("/connections", async (_req, res) => {
+  const orgId = res.locals.orgId as string;
 
   const connections = await db.query.metaConnections.findMany({
-    where: and(...conditions),
+    where: eq(metaConnections.orgId, orgId),
     with: {
       adAccounts: true,
       pages: true,
@@ -35,8 +20,8 @@ router.get("/connections", async (req, res) => {
 
   const result = connections.map((conn) => ({
     id: conn.id,
-    appId: conn.appId,
     orgId: conn.orgId,
+    userId: conn.userId,
     label: conn.label,
     metaUserId: conn.metaUserId,
     metaUserName: conn.metaUserName,

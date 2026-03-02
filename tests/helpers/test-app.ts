@@ -7,6 +7,7 @@ import connectionsRoutes from "../../src/routes/connections.js";
 import accountsRoutes from "../../src/routes/accounts.js";
 import insightsRoutes from "../../src/routes/insights.js";
 import { serviceKeyAuth } from "../../src/middleware/auth.js";
+import { requireIdentity } from "../../src/middleware/identity.js";
 
 export function createTestApp() {
   const app = express();
@@ -17,11 +18,14 @@ export function createTestApp() {
   app.use(healthRoutes);
   app.use(webhookRoutes);
 
-  // Auth routes
+  // Auth routes: authorize + disconnect need service key + identity
+  app.use("/auth/meta/authorize", serviceKeyAuth, requireIdentity);
+  app.use("/auth/meta/connections", serviceKeyAuth, requireIdentity);
   app.use(authRoutes);
 
-  // Protected routes
+  // Protected routes (service key + identity required)
   app.use(serviceKeyAuth);
+  app.use(requireIdentity);
   app.use(connectionsRoutes);
   app.use(accountsRoutes);
   app.use(insightsRoutes);
@@ -37,6 +41,8 @@ export function createTestApp() {
 export function getAuthHeaders(): Record<string, string> {
   return {
     "x-api-key": "test-service-key",
+    "x-org-id": "test-org-id",
+    "x-user-id": "test-user-id",
     "Content-Type": "application/json",
   };
 }

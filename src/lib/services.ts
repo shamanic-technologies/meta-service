@@ -27,10 +27,10 @@ async function runsRequest<T>(
 
 export async function createRun(params: {
   orgId: string;
-  appId: string;
+  userId: string;
   serviceName: string;
   taskName: string;
-  userId?: string;
+  parentRunId?: string;
   brandId?: string;
   campaignId?: string;
 }): Promise<{ id: string }> {
@@ -42,6 +42,7 @@ export async function addRunCosts(
   items: Array<{
     costName: string;
     quantity: number;
+    costSource: "platform" | "org";
     status?: "actual" | "provisioned";
   }>,
 ): Promise<void> {
@@ -87,49 +88,6 @@ export async function registerCost(
   }
 }
 
-// ==================== key-service ====================
-
-const KEY_SERVICE_URL = () =>
-  process.env.KEY_SERVICE_URL || "http://localhost:3001";
-const KEY_SERVICE_API_KEY = () => process.env.KEY_SERVICE_API_KEY || "";
-
-export async function registerAppKey(
-  appId: string,
-  provider: string,
-  apiKey: string,
-): Promise<void> {
-  const response = await fetch(`${KEY_SERVICE_URL()}/internal/app-keys`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": KEY_SERVICE_API_KEY(),
-    },
-    body: JSON.stringify({ appId, provider, apiKey }),
-  });
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    console.warn(
-      `[meta-service] Failed to register app key ${provider}: ${response.status} ${text}`,
-    );
-  }
-}
-
-export async function getDecryptedAppKey(provider: string): Promise<string> {
-  const response = await fetch(
-    `${KEY_SERVICE_URL()}/internal/app-keys/${provider}/decrypt?appId=meta-service`,
-    {
-      headers: { "x-api-key": KEY_SERVICE_API_KEY() },
-    },
-  );
-  if (!response.ok) {
-    throw new Error(
-      `Failed to get app key ${provider}: ${response.status}`,
-    );
-  }
-  const data = (await response.json()) as { provider: string; key: string };
-  return data.key;
-}
-
 // ==================== transactional-email-service ====================
 
 const EMAIL_SERVICE_URL = () =>
@@ -138,7 +96,7 @@ const EMAIL_SERVICE_API_KEY = () =>
   process.env.TRANSACTIONAL_EMAIL_SERVICE_API_KEY || "";
 
 export async function registerEmailTemplates(
-  appId: string,
+  serviceName: string,
   templates: Array<{
     name: string;
     subject: string;
@@ -152,7 +110,7 @@ export async function registerEmailTemplates(
       "Content-Type": "application/json",
       "x-api-key": EMAIL_SERVICE_API_KEY(),
     },
-    body: JSON.stringify({ appId, templates }),
+    body: JSON.stringify({ serviceName, templates }),
   });
   if (!response.ok) {
     const text = await response.text().catch(() => "");
@@ -163,23 +121,20 @@ export async function registerEmailTemplates(
 }
 
 export async function sendEmail(params: {
-  appId: string;
+  serviceName: string;
   eventType: string;
   recipientEmail?: string;
   orgId?: string;
   userId?: string;
   metadata?: Record<string, unknown>;
 }): Promise<void> {
-  // Map orgId/userId to clerkOrgId/clerkUserId for email service compat
-  const { orgId, userId, ...rest } = params;
-  const body = { ...rest, clerkOrgId: orgId, clerkUserId: userId };
   const response = await fetch(`${EMAIL_SERVICE_URL()}/send`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "x-api-key": EMAIL_SERVICE_API_KEY(),
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify(params),
   });
   if (!response.ok) {
     const text = await response.text().catch(() => "");

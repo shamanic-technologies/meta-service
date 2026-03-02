@@ -45,7 +45,7 @@ describe("Auth Middleware", () => {
   const app = createTestApp();
 
   it("returns 401 for protected routes without api key", async () => {
-    const res = await request(app).get("/connections").query({ appId: "test" });
+    const res = await request(app).get("/connections");
     expect(res.status).toBe(401);
     expect(res.body.error).toBe("Invalid service key");
   });
@@ -53,18 +53,43 @@ describe("Auth Middleware", () => {
   it("returns 401 for protected routes with wrong api key", async () => {
     const res = await request(app)
       .get("/connections")
-      .set("x-api-key", "wrong-key")
-      .query({ appId: "test" });
+      .set("x-api-key", "wrong-key");
     expect(res.status).toBe(401);
   });
 
-  it("allows access with correct api key", async () => {
+  it("returns 400 for protected routes without identity headers", async () => {
     const res = await request(app)
       .get("/connections")
-      .set(getAuthHeaders())
-      .query({ appId: "test" });
-    // Should get past auth (200, not 401)
+      .set("x-api-key", "test-service-key");
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("Missing required headers");
+  });
+
+  it("returns 400 without x-org-id header", async () => {
+    const res = await request(app)
+      .get("/connections")
+      .set("x-api-key", "test-service-key")
+      .set("x-user-id", "test-user-id");
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("Missing required headers");
+  });
+
+  it("returns 400 without x-user-id header", async () => {
+    const res = await request(app)
+      .get("/connections")
+      .set("x-api-key", "test-service-key")
+      .set("x-org-id", "test-org-id");
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("Missing required headers");
+  });
+
+  it("allows access with correct api key and identity headers", async () => {
+    const res = await request(app)
+      .get("/connections")
+      .set(getAuthHeaders());
+    // Should get past auth and identity (200, not 401 or 400)
     expect(res.status).not.toBe(401);
+    expect(res.status).not.toBe(400);
   });
 
   it("allows health check without auth", async () => {

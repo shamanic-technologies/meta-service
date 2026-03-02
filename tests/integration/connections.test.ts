@@ -10,8 +10,8 @@ vi.mock("../../src/db/index.js", () => ({
         findMany: vi.fn().mockResolvedValue([
           {
             id: "conn-1",
-            appId: "test-app",
-            orgId: "org-abc",
+            orgId: "test-org-id",
+            userId: "test-user-id",
             label: "Test",
             metaUserId: "meta-1",
             metaUserName: "Test User",
@@ -31,23 +31,24 @@ vi.mock("../../src/db/index.js", () => ({
 describe("GET /connections", () => {
   const app = createTestApp();
 
-  it("returns connections filtered by orgId", async () => {
-    const res = await request(app)
-      .get("/connections")
-      .set(getAuthHeaders())
-      .query({ appId: "test-app", orgId: "org-abc" });
-
-    expect(res.status).toBe(200);
-    expect(res.body.connections).toHaveLength(1);
-    expect(res.body.connections[0].orgId).toBe("org-abc");
-    expect(res.body.connections[0]).not.toHaveProperty("clerkOrgId");
-  });
-
-  it("returns 400 for missing appId", async () => {
+  it("returns connections for org", async () => {
     const res = await request(app)
       .get("/connections")
       .set(getAuthHeaders());
 
+    expect(res.status).toBe(200);
+    expect(res.body.connections).toHaveLength(1);
+    expect(res.body.connections[0].orgId).toBe("test-org-id");
+    expect(res.body.connections[0].userId).toBe("test-user-id");
+    expect(res.body.connections[0]).not.toHaveProperty("appId");
+  });
+
+  it("returns 400 without identity headers", async () => {
+    const res = await request(app)
+      .get("/connections")
+      .set("x-api-key", "test-service-key");
+
     expect(res.status).toBe(400);
+    expect(res.body.error).toContain("Missing required headers");
   });
 });

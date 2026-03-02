@@ -47,8 +47,6 @@ vi.mock("../../src/lib/services.js", () => ({
   addRunCosts: vi.fn().mockResolvedValue(undefined),
   completeRun: vi.fn().mockResolvedValue(undefined),
   registerCost: vi.fn().mockResolvedValue(undefined),
-  registerAppKey: vi.fn().mockResolvedValue(undefined),
-  getDecryptedAppKey: vi.fn().mockResolvedValue("test-key"),
   registerEmailTemplates: vi.fn().mockResolvedValue(undefined),
   sendEmail: vi.fn().mockResolvedValue(undefined),
 }));
@@ -59,17 +57,7 @@ describe("GET /insights", () => {
   it("returns 400 for missing adAccountId", async () => {
     const res = await request(app)
       .get("/insights")
-      .set(getAuthHeaders())
-      .query({ appId: "test-app" });
-
-    expect(res.status).toBe(400);
-  });
-
-  it("returns 400 for missing appId", async () => {
-    const res = await request(app)
-      .get("/insights")
-      .set(getAuthHeaders())
-      .query({ adAccountId: "act_123" });
+      .set(getAuthHeaders());
 
     expect(res.status).toBe(400);
   });
@@ -80,7 +68,6 @@ describe("GET /insights", () => {
       .set(getAuthHeaders())
       .query({
         adAccountId: "act_123",
-        appId: "test-app",
         breakdowns: "image_asset,age",
       });
 
@@ -94,7 +81,6 @@ describe("GET /insights", () => {
       .set(getAuthHeaders())
       .query({
         adAccountId: "act_123",
-        appId: "test-app",
         breakdowns: "age,gender,country,publisher_platform",
       });
 
@@ -108,10 +94,19 @@ describe("GET /insights", () => {
       .set(getAuthHeaders())
       .query({
         adAccountId: "act_nonexistent",
-        appId: "test-app",
       });
 
     expect(res.status).toBe(404);
     expect(res.body.error).toBe("Ad account not found");
+  });
+
+  it("returns 400 without identity headers", async () => {
+    const res = await request(app)
+      .get("/insights")
+      .set("x-api-key", "test-service-key")
+      .query({ adAccountId: "act_123" });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("Missing required headers");
   });
 });

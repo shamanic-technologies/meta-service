@@ -19,8 +19,8 @@ export async function insertTestConnection(
   const [conn] = await db
     .insert(metaConnections)
     .values({
-      appId: overrides.appId ?? "test-app",
-      orgId: overrides.orgId ?? "org-test",
+      orgId: overrides.orgId ?? "test-org-id",
+      userId: overrides.userId ?? "test-user-id",
       label: overrides.label ?? "Test Connection",
       metaUserId: overrides.metaUserId ?? `meta-user-${Date.now()}`,
       metaUserName: overrides.metaUserName ?? "Test User",
