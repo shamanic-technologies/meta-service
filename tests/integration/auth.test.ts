@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import request from "supertest";
 import { createTestApp, getAuthHeaders } from "../helpers/test-app.js";
 
@@ -11,7 +11,6 @@ describe("Auth Routes", () => {
         .get("/auth/meta/authorize")
         .set(getAuthHeaders())
         .query({
-          appId: "test-app",
           redirectUri: "https://example.com/callback",
           label: "My Connection",
         });
@@ -32,27 +31,29 @@ describe("Auth Routes", () => {
           "base64url",
         ).toString("utf-8"),
       );
-      expect(state.appId).toBe("test-app");
+      expect(state.orgId).toBe("test-org-id");
+      expect(state.userId).toBe("test-user-id");
       expect(state.redirectUri).toBe("https://example.com/callback");
       expect(state.label).toBe("My Connection");
+      expect(state).not.toHaveProperty("appId");
     });
 
     it("returns 400 for missing redirectUri", async () => {
       const res = await request(app)
         .get("/auth/meta/authorize")
-        .set(getAuthHeaders())
-        .query({ appId: "test-app" });
+        .set(getAuthHeaders());
 
       expect(res.status).toBe(400);
     });
 
-    it("returns 400 for missing appId", async () => {
+    it("returns 400 without identity headers", async () => {
       const res = await request(app)
         .get("/auth/meta/authorize")
-        .set(getAuthHeaders())
+        .set("x-api-key", "test-service-key")
         .query({ redirectUri: "https://example.com/callback" });
 
       expect(res.status).toBe(400);
+      expect(res.body.error).toContain("Missing required headers");
     });
   });
 

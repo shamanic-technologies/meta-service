@@ -1,7 +1,7 @@
 import { Router } from "express";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { metaAdAccounts, metaConnections } from "../db/schema.js";
+import { metaAdAccounts } from "../db/schema.js";
 import { InsightsQuerySchema } from "../schemas.js";
 import { decrypt } from "../lib/crypto.js";
 import { getInsights } from "../lib/meta-client.js";
@@ -29,8 +29,7 @@ router.get("/insights", async (req, res) => {
 
   const {
     adAccountId,
-    appId,
-    orgId,
+    parentRunId,
     level,
     objectId,
     datePreset,
@@ -42,6 +41,9 @@ router.get("/insights", async (req, res) => {
     limit,
     after,
   } = parsed.data;
+
+  const orgId = res.locals.orgId as string;
+  const userId = res.locals.userId as string;
 
   // Parse comma-separated breakdowns and fields
   const breakdowns = breakdownsStr
@@ -84,12 +86,7 @@ router.get("/insights", async (req, res) => {
   }
 
   // Verify ownership
-  if (account.connection.appId !== appId) {
-    res.status(404).json({ error: "Ad account not found" });
-    return;
-  }
-
-  if (orgId && account.connection.orgId !== orgId) {
+  if (account.connection.orgId !== orgId) {
     res.status(404).json({ error: "Ad account not found" });
     return;
   }
@@ -98,10 +95,11 @@ router.get("/insights", async (req, res) => {
   let runId: string | null = null;
   try {
     const run = await createRun({
-      orgId: orgId ?? account.connection.orgId ?? appId,
-      appId,
+      orgId,
+      userId,
       serviceName: "meta-service",
       taskName: "get-insights",
+      parentRunId,
     });
     runId = run.id;
   } catch (err) {
@@ -155,7 +153,7 @@ router.get("/insights", async (req, res) => {
     // Track costs
     if (runId) {
       await addRunCosts(runId, [
-        { costName: "meta-insights-query", quantity: 1 },
+        { costName: "meta-insights-query", quantity: 1, costSource: "platform" },
       ]).catch(() => {});
       await completeRun(runId, "completed").catch(() => {});
     }

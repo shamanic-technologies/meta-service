@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
   metaAdAccounts,
@@ -40,16 +40,12 @@ router.get("/accounts", async (req, res) => {
     return;
   }
 
-  const { appId, orgId, activeOnly } = parsed.data;
+  const { activeOnly } = parsed.data;
+  const orgId = res.locals.orgId as string;
 
-  // Find connections for this app/org
-  const conditions = [eq(metaConnections.appId, appId)];
-  if (orgId) {
-    conditions.push(eq(metaConnections.orgId, orgId));
-  }
-
+  // Find connections for this org
   const connections = await db.query.metaConnections.findMany({
-    where: and(...conditions),
+    where: eq(metaConnections.orgId, orgId),
     columns: { id: true },
   });
 
@@ -85,20 +81,15 @@ router.patch("/accounts/:adAccountId", async (req, res) => {
   }
 
   const { adAccountId } = req.params;
-  const appId = req.query.appId as string;
-
-  if (!appId) {
-    res.status(400).json({ error: "appId query parameter is required" });
-    return;
-  }
+  const orgId = res.locals.orgId as string;
 
   // Look up the account and verify ownership
   const account = await db.query.metaAdAccounts.findFirst({
     where: eq(metaAdAccounts.adAccountId, adAccountId),
-    with: { connection: { columns: { appId: true } } },
+    with: { connection: { columns: { orgId: true } } },
   });
 
-  if (!account || account.connection.appId !== appId) {
+  if (!account || account.connection.orgId !== orgId) {
     res.status(404).json({ error: "Account not found" });
     return;
   }
@@ -115,19 +106,14 @@ router.patch("/accounts/:adAccountId", async (req, res) => {
 // POST /accounts/:adAccountId/sync — Re-fetch from Meta
 router.post("/accounts/:adAccountId/sync", async (req, res) => {
   const { adAccountId } = req.params;
-  const appId = req.query.appId as string;
-
-  if (!appId) {
-    res.status(400).json({ error: "appId query parameter is required" });
-    return;
-  }
+  const orgId = res.locals.orgId as string;
 
   const account = await db.query.metaAdAccounts.findFirst({
     where: eq(metaAdAccounts.adAccountId, adAccountId),
     with: { connection: true },
   });
 
-  if (!account || account.connection.appId !== appId) {
+  if (!account || account.connection.orgId !== orgId) {
     res.status(404).json({ error: "Account not found" });
     return;
   }

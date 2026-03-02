@@ -14,6 +14,7 @@ import connectionsRoutes from "./routes/connections.js";
 import accountsRoutes from "./routes/accounts.js";
 import insightsRoutes from "./routes/insights.js";
 import { serviceKeyAuth } from "./middleware/auth.js";
+import { requireIdentity } from "./middleware/identity.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -40,12 +41,14 @@ app.get("/openapi.json", (_req, res) => {
 app.use(healthRoutes);
 app.use(webhookRoutes);
 
-// Auth routes: authorize needs service key, callback is hit by Meta redirect
-app.use("/auth/meta", serviceKeyAuth);
+// Auth routes: authorize needs service key + identity, callback is hit by Meta redirect
+app.use("/auth/meta/authorize", serviceKeyAuth, requireIdentity);
+app.use("/auth/meta/connections", serviceKeyAuth, requireIdentity);
 app.use(authRoutes);
 
-// Protected routes (service key required)
+// Protected routes (service key + identity required)
 app.use(serviceKeyAuth);
+app.use(requireIdentity);
 app.use(connectionsRoutes);
 app.use(accountsRoutes);
 app.use(insightsRoutes);

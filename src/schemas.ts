@@ -69,8 +69,6 @@ registry.registerPath({
 
 export const AuthorizeQuerySchema = z
   .object({
-    appId: z.string().min(1),
-    orgId: z.string().optional(),
     redirectUri: z.string().url(),
     label: z.string().optional(),
   })
@@ -89,6 +87,10 @@ registry.registerPath({
   security: [{ serviceKeyAuth: [] }],
   request: {
     query: AuthorizeQuerySchema,
+    headers: z.object({
+      "x-org-id": z.string().openapi({ description: "Internal org UUID from client-service" }),
+      "x-user-id": z.string().openapi({ description: "Internal user UUID from client-service" }),
+    }),
   },
   responses: {
     200: {
@@ -153,6 +155,10 @@ registry.registerPath({
   security: [{ serviceKeyAuth: [] }],
   request: {
     params: DisconnectParamsSchema,
+    headers: z.object({
+      "x-org-id": z.string().openapi({ description: "Internal org UUID from client-service" }),
+      "x-user-id": z.string().openapi({ description: "Internal user UUID from client-service" }),
+    }),
   },
   responses: {
     200: {
@@ -167,13 +173,6 @@ registry.registerPath({
 });
 
 // ==================== Connections ====================
-
-export const ConnectionsQuerySchema = z
-  .object({
-    appId: z.string().min(1),
-    orgId: z.string().optional(),
-  })
-  .openapi("ConnectionsQuery");
 
 const AdAccountSummarySchema = z
   .object({
@@ -199,8 +198,8 @@ const PageSummarySchema = z
 export const ConnectionResponseSchema = z
   .object({
     id: z.string().uuid(),
-    appId: z.string(),
-    orgId: z.string().nullable(),
+    orgId: z.string(),
+    userId: z.string(),
     label: z.string().nullable(),
     metaUserId: z.string(),
     metaUserName: z.string().nullable(),
@@ -215,10 +214,13 @@ export const ConnectionResponseSchema = z
 registry.registerPath({
   method: "get",
   path: "/connections",
-  summary: "List Meta connections for an app/org",
+  summary: "List Meta connections for an org",
   security: [{ serviceKeyAuth: [] }],
   request: {
-    query: ConnectionsQuerySchema,
+    headers: z.object({
+      "x-org-id": z.string().openapi({ description: "Internal org UUID from client-service" }),
+      "x-user-id": z.string().openapi({ description: "Internal user UUID from client-service" }),
+    }),
   },
   responses: {
     200: {
@@ -232,7 +234,7 @@ registry.registerPath({
       },
     },
     400: {
-      description: "Missing appId",
+      description: "Missing identity headers",
       content: { "application/json": { schema: ErrorResponseSchema } },
     },
   },
@@ -242,8 +244,6 @@ registry.registerPath({
 
 export const AccountsQuerySchema = z
   .object({
-    appId: z.string().min(1),
-    orgId: z.string().optional(),
     activeOnly: z.coerce.boolean().default(true),
   })
   .openapi("AccountsQuery");
@@ -270,6 +270,10 @@ registry.registerPath({
   security: [{ serviceKeyAuth: [] }],
   request: {
     query: AccountsQuerySchema,
+    headers: z.object({
+      "x-org-id": z.string().openapi({ description: "Internal org UUID from client-service" }),
+      "x-user-id": z.string().openapi({ description: "Internal user UUID from client-service" }),
+    }),
   },
   responses: {
     200: {
@@ -296,6 +300,10 @@ registry.registerPath({
   security: [{ serviceKeyAuth: [] }],
   request: {
     params: z.object({ adAccountId: z.string() }),
+    headers: z.object({
+      "x-org-id": z.string().openapi({ description: "Internal org UUID from client-service" }),
+      "x-user-id": z.string().openapi({ description: "Internal user UUID from client-service" }),
+    }),
     body: {
       content: {
         "application/json": { schema: PatchAccountBodySchema },
@@ -323,6 +331,10 @@ registry.registerPath({
   security: [{ serviceKeyAuth: [] }],
   request: {
     params: z.object({ adAccountId: z.string() }),
+    headers: z.object({
+      "x-org-id": z.string().openapi({ description: "Internal org UUID from client-service" }),
+      "x-user-id": z.string().openapi({ description: "Internal user UUID from client-service" }),
+    }),
   },
   responses: {
     200: {
@@ -343,8 +355,7 @@ registry.registerPath({
 export const InsightsQuerySchema = z
   .object({
     adAccountId: z.string().min(1),
-    appId: z.string().min(1),
-    orgId: z.string().optional(),
+    parentRunId: z.string().uuid().optional(),
     level: z
       .enum(["account", "campaign", "adset", "ad"])
       .default("campaign"),
@@ -414,6 +425,10 @@ registry.registerPath({
   security: [{ serviceKeyAuth: [] }],
   request: {
     query: InsightsQuerySchema,
+    headers: z.object({
+      "x-org-id": z.string().openapi({ description: "Internal org UUID from client-service" }),
+      "x-user-id": z.string().openapi({ description: "Internal user UUID from client-service" }),
+    }),
   },
   responses: {
     200: {

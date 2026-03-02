@@ -44,7 +44,9 @@ router.get("/auth/meta/authorize", (req, res) => {
     return;
   }
 
-  const { appId, orgId, redirectUri, label } = parsed.data;
+  const { redirectUri, label } = parsed.data;
+  const orgId = res.locals.orgId as string;
+  const userId = res.locals.userId as string;
   const metaAppId = process.env.META_APP_ID;
 
   if (!metaAppId) {
@@ -54,7 +56,7 @@ router.get("/auth/meta/authorize", (req, res) => {
 
   // Encode state as base64 JSON
   const state = Buffer.from(
-    JSON.stringify({ appId, orgId, redirectUri, label }),
+    JSON.stringify({ orgId, userId, redirectUri, label }),
   ).toString("base64url");
 
   // Build the callback URL — Meta redirects here
@@ -85,8 +87,8 @@ router.get("/auth/meta/callback", async (req, res) => {
 
   // Decode state
   let stateData: {
-    appId: string;
-    orgId?: string;
+    orgId: string;
+    userId: string;
     redirectUri: string;
     label?: string;
   };
@@ -166,8 +168,8 @@ router.get("/auth/meta/callback", async (req, res) => {
     const [connection] = await db
       .insert(metaConnections)
       .values({
-        appId: stateData.appId,
-        orgId: stateData.orgId ?? null,
+        orgId: stateData.orgId,
+        userId: stateData.userId,
         label: stateData.label ?? null,
         metaUserId: meResult.data.id,
         metaUserName: meResult.data.name,
@@ -253,17 +255,12 @@ router.delete(
   "/auth/meta/connections/:connectionId",
   async (req, res) => {
     const { connectionId } = req.params;
-    const appId = req.query.appId as string;
-
-    if (!appId) {
-      res.status(400).json({ error: "appId query parameter is required" });
-      return;
-    }
+    const orgId = res.locals.orgId as string;
 
     const connection = await db.query.metaConnections.findFirst({
       where: and(
         eq(metaConnections.id, connectionId),
-        eq(metaConnections.appId, appId),
+        eq(metaConnections.orgId, orgId),
       ),
     });
 

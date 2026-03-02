@@ -1,5 +1,4 @@
 import {
-  registerAppKey,
   registerCost,
   registerEmailTemplates,
 } from "./services.js";
@@ -8,24 +7,11 @@ export async function runStartupRegistrations(): Promise<void> {
   console.log("[meta-service] Running startup registrations...");
 
   await Promise.allSettled([
-    registerAppSecrets(),
     registerCostNames(),
     registerTemplates(),
   ]);
 
   console.log("[meta-service] Startup registrations complete");
-}
-
-async function registerAppSecrets(): Promise<void> {
-  const metaAppId = process.env.META_APP_ID;
-  const metaAppSecret = process.env.META_APP_SECRET;
-
-  if (metaAppId) {
-    await registerAppKey("meta-service", "meta-app-id", metaAppId);
-  }
-  if (metaAppSecret) {
-    await registerAppKey("meta-service", "meta-app-secret", metaAppSecret);
-  }
 }
 
 async function registerCostNames(): Promise<void> {
