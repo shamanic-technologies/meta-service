@@ -90,6 +90,7 @@ registry.registerPath({
     headers: z.object({
       "x-org-id": z.string().openapi({ description: "Internal org UUID from client-service" }),
       "x-user-id": z.string().openapi({ description: "Internal user UUID from client-service" }),
+      "x-run-id": z.string().openapi({ description: "Caller's run ID (used as parentRunId when creating a child run)" }),
     }),
   },
   responses: {
@@ -158,6 +159,7 @@ registry.registerPath({
     headers: z.object({
       "x-org-id": z.string().openapi({ description: "Internal org UUID from client-service" }),
       "x-user-id": z.string().openapi({ description: "Internal user UUID from client-service" }),
+      "x-run-id": z.string().openapi({ description: "Caller's run ID (used as parentRunId when creating a child run)" }),
     }),
   },
   responses: {
@@ -220,6 +222,7 @@ registry.registerPath({
     headers: z.object({
       "x-org-id": z.string().openapi({ description: "Internal org UUID from client-service" }),
       "x-user-id": z.string().openapi({ description: "Internal user UUID from client-service" }),
+      "x-run-id": z.string().openapi({ description: "Caller's run ID (used as parentRunId when creating a child run)" }),
     }),
   },
   responses: {
@@ -273,6 +276,7 @@ registry.registerPath({
     headers: z.object({
       "x-org-id": z.string().openapi({ description: "Internal org UUID from client-service" }),
       "x-user-id": z.string().openapi({ description: "Internal user UUID from client-service" }),
+      "x-run-id": z.string().openapi({ description: "Caller's run ID (used as parentRunId when creating a child run)" }),
     }),
   },
   responses: {
@@ -303,6 +307,7 @@ registry.registerPath({
     headers: z.object({
       "x-org-id": z.string().openapi({ description: "Internal org UUID from client-service" }),
       "x-user-id": z.string().openapi({ description: "Internal user UUID from client-service" }),
+      "x-run-id": z.string().openapi({ description: "Caller's run ID (used as parentRunId when creating a child run)" }),
     }),
     body: {
       content: {
@@ -334,6 +339,7 @@ registry.registerPath({
     headers: z.object({
       "x-org-id": z.string().openapi({ description: "Internal org UUID from client-service" }),
       "x-user-id": z.string().openapi({ description: "Internal user UUID from client-service" }),
+      "x-run-id": z.string().openapi({ description: "Caller's run ID (used as parentRunId when creating a child run)" }),
     }),
   },
   responses: {
@@ -355,7 +361,7 @@ registry.registerPath({
 export const InsightsQuerySchema = z
   .object({
     adAccountId: z.string().min(1),
-    parentRunId: z.string().uuid().optional(),
+
     level: z
       .enum(["account", "campaign", "adset", "ad"])
       .default("campaign"),
@@ -428,6 +434,7 @@ registry.registerPath({
     headers: z.object({
       "x-org-id": z.string().openapi({ description: "Internal org UUID from client-service" }),
       "x-user-id": z.string().openapi({ description: "Internal user UUID from client-service" }),
+      "x-run-id": z.string().openapi({ description: "Caller's run ID (used as parentRunId when creating a child run)" }),
     }),
   },
   responses: {

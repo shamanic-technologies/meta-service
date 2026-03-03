@@ -29,7 +29,6 @@ router.get("/insights", async (req, res) => {
 
   const {
     adAccountId,
-    parentRunId,
     level,
     objectId,
     datePreset,
@@ -44,6 +43,7 @@ router.get("/insights", async (req, res) => {
 
   const orgId = res.locals.orgId as string;
   const userId = res.locals.userId as string;
+  const parentRunId = res.locals.runId as string;
 
   // Parse comma-separated breakdowns and fields
   const breakdowns = breakdownsStr

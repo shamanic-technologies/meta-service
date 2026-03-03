@@ -470,6 +470,16 @@
             "description": "Internal user UUID from client-service",
             "name": "x-user-id",
             "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Caller's run ID (used as parentRunId when creating a child run)"
+            },
+            "required": true,
+            "description": "Caller's run ID (used as parentRunId when creating a child run)",
+            "name": "x-run-id",
+            "in": "header"
           }
         ],
         "responses": {
@@ -571,6 +581,16 @@
             "description": "Internal user UUID from client-service",
             "name": "x-user-id",
             "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Caller's run ID (used as parentRunId when creating a child run)"
+            },
+            "required": true,
+            "description": "Caller's run ID (used as parentRunId when creating a child run)",
+            "name": "x-run-id",
+            "in": "header"
           }
         ],
         "responses": {
@@ -624,6 +644,16 @@
             "required": true,
             "description": "Internal user UUID from client-service",
             "name": "x-user-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Caller's run ID (used as parentRunId when creating a child run)"
+            },
+            "required": true,
+            "description": "Caller's run ID (used as parentRunId when creating a child run)",
+            "name": "x-run-id",
             "in": "header"
           }
         ],
@@ -700,6 +730,16 @@
             "description": "Internal user UUID from client-service",
             "name": "x-user-id",
             "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Caller's run ID (used as parentRunId when creating a child run)"
+            },
+            "required": true,
+            "description": "Caller's run ID (used as parentRunId when creating a child run)",
+            "name": "x-run-id",
+            "in": "header"
           }
         ],
         "responses": {
@@ -762,6 +802,16 @@
             "required": true,
             "description": "Internal user UUID from client-service",
             "name": "x-user-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Caller's run ID (used as parentRunId when creating a child run)"
+            },
+            "required": true,
+            "description": "Caller's run ID (used as parentRunId when creating a child run)",
+            "name": "x-run-id",
             "in": "header"
           }
         ],
@@ -834,6 +884,16 @@
             "description": "Internal user UUID from client-service",
             "name": "x-user-id",
             "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Caller's run ID (used as parentRunId when creating a child run)"
+            },
+            "required": true,
+            "description": "Caller's run ID (used as parentRunId when creating a child run)",
+            "name": "x-run-id",
+            "in": "header"
           }
         ],
         "responses": {
@@ -876,15 +936,6 @@
             },
             "required": true,
             "name": "adAccountId",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "required": false,
-            "name": "parentRunId",
             "in": "query"
           },
           {
@@ -1007,6 +1058,16 @@
             "required": true,
             "description": "Internal user UUID from client-service",
             "name": "x-user-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Caller's run ID (used as parentRunId when creating a child run)"
+            },
+            "required": true,
+            "description": "Caller's run ID (used as parentRunId when creating a child run)",
+            "name": "x-run-id",
             "in": "header"
           }
         ],
