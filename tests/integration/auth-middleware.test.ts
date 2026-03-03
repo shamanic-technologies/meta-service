@@ -78,7 +78,18 @@ describe("Auth Middleware", () => {
     const res = await request(app)
       .get("/connections")
       .set("x-api-key", "test-service-key")
-      .set("x-org-id", "test-org-id");
+      .set("x-org-id", "test-org-id")
+      .set("x-run-id", "test-run-id");
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("Missing required headers");
+  });
+
+  it("returns 400 without x-run-id header", async () => {
+    const res = await request(app)
+      .get("/connections")
+      .set("x-api-key", "test-service-key")
+      .set("x-org-id", "test-org-id")
+      .set("x-user-id", "test-user-id");
     expect(res.status).toBe(400);
     expect(res.body.error).toContain("Missing required headers");
   });
