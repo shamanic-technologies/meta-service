@@ -403,6 +403,511 @@
             "type": "string"
           }
         }
+      },
+      "ManagedCampaign": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "orgId": {
+            "type": "string"
+          },
+          "brandId": {
+            "type": "string",
+            "nullable": true
+          },
+          "campaignId": {
+            "type": "string",
+            "nullable": true
+          },
+          "metaAdAccountId": {
+            "type": "string"
+          },
+          "metaCampaignId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "objective": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "dailyBudgetCents": {
+            "type": "number"
+          },
+          "destinationUrl": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "adSets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ManagedAdSet"
+            }
+          },
+          "ads": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ManagedAd"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "orgId",
+          "brandId",
+          "campaignId",
+          "metaAdAccountId",
+          "metaCampaignId",
+          "name",
+          "objective",
+          "status",
+          "dailyBudgetCents",
+          "destinationUrl",
+          "createdAt",
+          "adSets",
+          "ads"
+        ]
+      },
+      "ManagedAdSet": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "metaAdSetId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "dailyBudgetCents": {
+            "type": "number"
+          },
+          "optimizationGoal": {
+            "type": "string"
+          },
+          "customEventType": {
+            "type": "string",
+            "nullable": true
+          },
+          "billingEvent": {
+            "type": "string"
+          },
+          "targeting": {
+            "nullable": true
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "metaAdSetId",
+          "name",
+          "dailyBudgetCents",
+          "optimizationGoal",
+          "customEventType",
+          "billingEvent",
+          "status"
+        ]
+      },
+      "ManagedAd": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "metaAdId": {
+            "type": "string"
+          },
+          "metaCreativeId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "primaryText": {
+            "type": "string"
+          },
+          "headline": {
+            "type": "string",
+            "nullable": true
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "callToAction": {
+            "type": "string"
+          },
+          "destinationUrl": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "reviewStatus": {
+            "type": "string"
+          },
+          "reviewFeedback": {
+            "nullable": true
+          },
+          "reviewCheckedAt": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "metaAdId",
+          "metaCreativeId",
+          "name",
+          "primaryText",
+          "headline",
+          "description",
+          "callToAction",
+          "destinationUrl",
+          "status",
+          "reviewStatus",
+          "reviewCheckedAt"
+        ]
+      },
+      "CreateManagedCampaignRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "brandId": {
+            "type": "string"
+          },
+          "campaignId": {
+            "type": "string"
+          },
+          "featureSlug": {
+            "type": "string"
+          },
+          "dailyBudgetCents": {
+            "type": "integer",
+            "minimum": 100
+          },
+          "destinationUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "adCopy": {
+            "$ref": "#/components/schemas/AdCopy"
+          },
+          "callToAction": {
+            "type": "string",
+            "minLength": 1
+          },
+          "optimization": {
+            "$ref": "#/components/schemas/Optimization"
+          },
+          "targeting": {
+            "$ref": "#/components/schemas/Targeting"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "PAUSED"
+            ]
+          },
+          "adName": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "name",
+          "dailyBudgetCents",
+          "destinationUrl",
+          "adCopy",
+          "optimization",
+          "targeting"
+        ]
+      },
+      "AdCopy": {
+        "type": "object",
+        "properties": {
+          "primaryText": {
+            "type": "string",
+            "minLength": 1
+          },
+          "headline": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "primaryText"
+        ],
+        "description": "Text only. No image is supplied and none is generated: Meta renders the destination page's own link preview."
+      },
+      "Optimization": {
+        "type": "object",
+        "properties": {
+          "goal": {
+            "$ref": "#/components/schemas/OptimizationGoal"
+          },
+          "customEventType": {
+            "type": "string",
+            "description": "Required when goal is OFFSITE_CONVERSIONS, e.g. PURCHASE, LEAD, ADD_TO_CART, COMPLETE_REGISTRATION."
+          }
+        },
+        "required": [
+          "goal"
+        ]
+      },
+      "OptimizationGoal": {
+        "type": "string",
+        "enum": [
+          "REACH",
+          "IMPRESSIONS",
+          "LINK_CLICKS",
+          "LANDING_PAGE_VIEWS",
+          "OFFSITE_CONVERSIONS",
+          "LEAD_GENERATION"
+        ],
+        "description": "What the ad set optimises delivery for. Per campaign, and changeable afterwards: the right event moves one step deeper down the funnel as volume accrues."
+      },
+      "Targeting": {
+        "type": "object",
+        "properties": {
+          "countries": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 2
+            },
+            "minItems": 1
+          },
+          "ageMin": {
+            "type": "integer",
+            "minimum": 13,
+            "maximum": 65
+          },
+          "ageMax": {
+            "type": "integer",
+            "minimum": 13,
+            "maximum": 65
+          },
+          "genders": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2
+            }
+          },
+          "locales": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          }
+        },
+        "required": [
+          "countries"
+        ]
+      },
+      "ManagedCampaignList": {
+        "type": "object",
+        "properties": {
+          "campaigns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ManagedCampaign"
+            }
+          }
+        },
+        "required": [
+          "campaigns"
+        ]
+      },
+      "UpdateOptimizationRequest": {
+        "type": "object",
+        "properties": {
+          "goal": {
+            "$ref": "#/components/schemas/OptimizationGoal"
+          },
+          "customEventType": {
+            "type": "string",
+            "description": "Required when goal is OFFSITE_CONVERSIONS, e.g. PURCHASE, LEAD, ADD_TO_CART, COMPLETE_REGISTRATION."
+          }
+        },
+        "required": [
+          "goal"
+        ]
+      },
+      "SpendLedger": {
+        "type": "object",
+        "properties": {
+          "metaCampaignId": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "days": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "spendDate": {
+                  "type": "string"
+                },
+                "observedCents": {
+                  "type": "number"
+                },
+                "declaredCents": {
+                  "type": "number"
+                },
+                "lastObservedAt": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "spendDate",
+                "observedCents",
+                "declaredCents",
+                "lastObservedAt"
+              ]
+            }
+          },
+          "totalObservedCents": {
+            "type": "number"
+          },
+          "totalDeclaredCents": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "metaCampaignId",
+          "currency",
+          "days",
+          "totalObservedCents",
+          "totalDeclaredCents"
+        ]
+      },
+      "UploadConversionsResponse": {
+        "type": "object",
+        "properties": {
+          "eventsReceived": {
+            "type": "number"
+          },
+          "fbtraceId": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "eventsReceived",
+          "fbtraceId"
+        ]
+      },
+      "UploadConversionsRequest": {
+        "type": "object",
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConversionEvent"
+            },
+            "minItems": 1,
+            "maxItems": 1000
+          },
+          "testEventCode": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "events"
+        ]
+      },
+      "ConversionEvent": {
+        "type": "object",
+        "properties": {
+          "eventName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "eventTime": {
+            "type": "integer"
+          },
+          "eventId": {
+            "type": "string"
+          },
+          "eventSourceUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "actionSource": {
+            "type": "string",
+            "enum": [
+              "website",
+              "app",
+              "chat",
+              "email",
+              "other",
+              "phone_call",
+              "physical_store",
+              "system_generated"
+            ]
+          },
+          "userData": {
+            "type": "object",
+            "properties": {
+              "email": {
+                "type": "string"
+              },
+              "phone": {
+                "type": "string"
+              },
+              "externalId": {
+                "type": "string"
+              },
+              "clientIpAddress": {
+                "type": "string"
+              },
+              "clientUserAgent": {
+                "type": "string"
+              },
+              "fbc": {
+                "type": "string"
+              },
+              "fbp": {
+                "type": "string"
+              }
+            }
+          },
+          "customData": {
+            "type": "object",
+            "additionalProperties": {
+              "nullable": true
+            }
+          }
+        },
+        "required": [
+          "eventName",
+          "eventTime",
+          "userData"
+        ]
       }
     },
     "parameters": {}
@@ -1112,6 +1617,658 @@
         "responses": {
           "200": {
             "description": "Event received"
+          }
+        }
+      }
+    },
+    "/managed/campaigns": {
+      "post": {
+        "summary": "Launch a managed Meta campaign: campaign, ad set (targeting, budget, optimisation) and a text-only ad, submitted for review",
+        "security": [
+          {
+            "serviceKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Internal org UUID"
+            },
+            "required": true,
+            "description": "Internal org UUID",
+            "name": "x-org-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Internal user UUID"
+            },
+            "required": true,
+            "description": "Internal user UUID",
+            "name": "x-user-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Caller's run ID"
+            },
+            "required": true,
+            "description": "Caller's run ID",
+            "name": "x-run-id",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateManagedCampaignRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created and submitted for review",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedCampaign"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Meta refuses the change — e.g. an optimisation goal outside the campaign's fixed objective",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Meta or a fleet dependency refused or failed the call",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "List managed campaigns for the calling org",
+        "security": [
+          {
+            "serviceKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "brandId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "campaignId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Internal org UUID"
+            },
+            "required": true,
+            "description": "Internal org UUID",
+            "name": "x-org-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Internal user UUID"
+            },
+            "required": true,
+            "description": "Internal user UUID",
+            "name": "x-user-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Caller's run ID"
+            },
+            "required": true,
+            "description": "Caller's run ID",
+            "name": "x-run-id",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Managed campaigns",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedCampaignList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Meta refuses the change — e.g. an optimisation goal outside the campaign's fixed objective",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Meta or a fleet dependency refused or failed the call",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/managed/campaigns/{id}": {
+      "get": {
+        "summary": "Read a managed campaign back, including each ad's review outcome and Meta's feedback on a rejection",
+        "security": [
+          {
+            "serviceKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Internal org UUID"
+            },
+            "required": true,
+            "description": "Internal org UUID",
+            "name": "x-org-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Internal user UUID"
+            },
+            "required": true,
+            "description": "Internal user UUID",
+            "name": "x-user-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Caller's run ID"
+            },
+            "required": true,
+            "description": "Caller's run ID",
+            "name": "x-run-id",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Managed campaign",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedCampaign"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found for this org",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Meta refuses the change — e.g. an optimisation goal outside the campaign's fixed objective",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Meta or a fleet dependency refused or failed the call",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/managed/campaigns/{id}/optimization": {
+      "patch": {
+        "summary": "Change what the campaign's ad set optimises on, e.g. one step deeper down the funnel",
+        "security": [
+          {
+            "serviceKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Internal org UUID"
+            },
+            "required": true,
+            "description": "Internal org UUID",
+            "name": "x-org-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Internal user UUID"
+            },
+            "required": true,
+            "description": "Internal user UUID",
+            "name": "x-user-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Caller's run ID"
+            },
+            "required": true,
+            "description": "Caller's run ID",
+            "name": "x-run-id",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateOptimizationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Optimisation updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedCampaign"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found for this org",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Meta refuses the change — e.g. an optimisation goal outside the campaign's fixed objective",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Meta or a fleet dependency refused or failed the call",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/managed/campaigns/{id}/spend": {
+      "get": {
+        "summary": "Per-day Meta spend for a managed campaign, and how much of it has been declared as the org's cost",
+        "security": [
+          {
+            "serviceKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Internal org UUID"
+            },
+            "required": true,
+            "description": "Internal org UUID",
+            "name": "x-org-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Internal user UUID"
+            },
+            "required": true,
+            "description": "Internal user UUID",
+            "name": "x-user-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Caller's run ID"
+            },
+            "required": true,
+            "description": "Caller's run ID",
+            "name": "x-run-id",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Spend ledger",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpendLedger"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found for this org",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Meta refuses the change — e.g. an optimisation goal outside the campaign's fixed objective",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Meta or a fleet dependency refused or failed the call",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/managed/conversions": {
+      "post": {
+        "summary": "Forward conversions measured on the brand's own site to Meta server-side (Conversions API)",
+        "security": [
+          {
+            "serviceKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Internal org UUID"
+            },
+            "required": true,
+            "description": "Internal org UUID",
+            "name": "x-org-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Internal user UUID"
+            },
+            "required": true,
+            "description": "Internal user UUID",
+            "name": "x-user-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Caller's run ID"
+            },
+            "required": true,
+            "description": "Caller's run ID",
+            "name": "x-run-id",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadConversionsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Meta accepted the events",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadConversionsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Meta refuses the change — e.g. an optimisation goal outside the campaign's fixed objective",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Meta or a fleet dependency refused or failed the call",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/review-sync": {
+      "post": {
+        "summary": "Run the ad-review poll now. The same work the review cron does on its own cadence; it is never chained into a launch.",
+        "security": [
+          {
+            "serviceKeyAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Review sync summary"
+          },
+          "502": {
+            "description": "Sync failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/spend-sync": {
+      "post": {
+        "summary": "Run the spend ingestion now. The same work the spend cron does on its own cadence; it is never chained into a launch.",
+        "security": [
+          {
+            "serviceKeyAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Spend ingest summary"
+          },
+          "502": {
+            "description": "Ingest failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
