@@ -104,6 +104,18 @@ export function goalsForObjective(objective: string): OptimizationGoal[] {
   );
 }
 
+/**
+ * The request cannot be satisfied as written — a conversion goal with no event
+ * to optimise on, for instance. The caller's fault, and it must be told which
+ * part: not a 500, and never a silently-dropped field.
+ */
+export class ManagedRequestError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ManagedRequestError";
+  }
+}
+
 export interface PromotedObjectInput {
   goal: OptimizationGoal;
   datasetId: string | null;
@@ -121,12 +133,12 @@ export function buildPromotedObject(
 ): Record<string, string> | null {
   if (input.goal === "OFFSITE_CONVERSIONS") {
     if (!input.datasetId) {
-      throw new Error(
+      throw new ManagedRequestError(
         "OFFSITE_CONVERSIONS needs a Meta dataset (pixel); none is configured as a platform key",
       );
     }
     if (!input.customEventType) {
-      throw new Error(
+      throw new ManagedRequestError(
         "OFFSITE_CONVERSIONS needs a customEventType (the event to optimise on)",
       );
     }
@@ -556,9 +568,13 @@ export async function uploadConversions(input: {
 
   const eventsReceived = data.events_received ?? 0;
   if (eventsReceived === 0) {
-    throw new Error(
-      `Meta accepted none of the ${input.events.length} conversion event(s) sent to dataset ${input.datasetId}`,
-    );
+    // A batch Meta accepted nothing from is a refusal, surfaced as one — never
+    // a 200 that reads as a forwarded conversion.
+    throw new MetaApiCallError("upload conversions", {
+      message: `Meta accepted none of the ${input.events.length} conversion event(s) sent to dataset ${input.datasetId}`,
+      type: "ConversionsApiRejection",
+      code: 0,
+    });
   }
 
   return {
