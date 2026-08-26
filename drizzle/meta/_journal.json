@@ -1,0 +1,13 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1756166400000,
+      "tag": "0000_managed_meta_ads",
+      "breakpoints": true
+    }
+  ]
+}

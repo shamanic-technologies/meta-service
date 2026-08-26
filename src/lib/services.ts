@@ -6,13 +6,16 @@ const RUNS_SERVICE_API_KEY = () => process.env.RUNS_SERVICE_API_KEY || "";
 
 async function runsRequest<T>(
   path: string,
-  options: { method?: string; body?: unknown } = {},
+  options: { method?: string; body?: unknown; idempotencyKey?: string } = {},
 ): Promise<T> {
   const response = await fetch(`${RUNS_SERVICE_URL()}${path}`, {
     method: options.method || "GET",
     headers: {
       "Content-Type": "application/json",
       "X-API-Key": RUNS_SERVICE_API_KEY(),
+      ...(options.idempotencyKey
+        ? { "Idempotency-Key": options.idempotencyKey }
+        : {}),
     },
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
@@ -33,8 +36,13 @@ export async function createRun(params: {
   parentRunId?: string;
   brandId?: string;
   campaignId?: string;
-}): Promise<{ id: string }> {
-  return runsRequest("/v1/runs", { method: "POST", body: params });
+  featureSlug?: string;
+}, idempotencyKey?: string): Promise<{ id: string }> {
+  return runsRequest("/v1/runs", {
+    method: "POST",
+    body: params,
+    idempotencyKey,
+  });
 }
 
 export async function addRunCosts(
@@ -45,10 +53,12 @@ export async function addRunCosts(
     costSource: "platform" | "org";
     status?: "actual" | "provisioned";
   }>,
+  idempotencyKey?: string,
 ): Promise<void> {
   await runsRequest(`/v1/runs/${runId}/costs`, {
     method: "POST",
     body: { items },
+    idempotencyKey,
   });
 }
 

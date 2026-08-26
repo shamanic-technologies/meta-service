@@ -13,6 +13,10 @@ import authRoutes from "./routes/auth.js";
 import connectionsRoutes from "./routes/connections.js";
 import accountsRoutes from "./routes/accounts.js";
 import insightsRoutes from "./routes/insights.js";
+import managedRoutes from "./routes/managed.js";
+import internalRoutes from "./routes/internal.js";
+import { MetaApiCallError } from "./lib/meta-ads.js";
+import { startReviewSync, startSpendSync } from "./services/crons.js";
 import { serviceKeyAuth } from "./middleware/auth.js";
 import { requireIdentity } from "./middleware/identity.js";
 
@@ -46,12 +50,16 @@ app.use("/auth/meta/authorize", serviceKeyAuth, requireIdentity);
 app.use("/auth/meta/connections", serviceKeyAuth, requireIdentity);
 app.use(authRoutes);
 
+// Fleet-internal jobs: service key, no org on the wire.
+app.use(serviceKeyAuth, internalRoutes);
+
 // Protected routes (service key + identity required)
 app.use(serviceKeyAuth);
 app.use(requireIdentity);
 app.use(connectionsRoutes);
 app.use(accountsRoutes);
 app.use(insightsRoutes);
+app.use(managedRoutes);
 
 // 404
 app.use((_req, res) => {
@@ -61,7 +69,12 @@ app.use((_req, res) => {
 // Sentry error handler
 Sentry.setupExpressErrorHandler(app);
 
-// Fallback error handler
+// Fallback error handler.
+//
+// A Meta refusal — a policy rejection, an invalid targeting spec, a permissions
+// problem — arrives as an error envelope, and it is surfaced with Meta's own
+// code and message rather than flattened into a generic 500. Nothing here
+// converts a failure into a success.
 app.use(
   (
     err: Error,
@@ -69,6 +82,17 @@ app.use(
     res: express.Response,
     _next: express.NextFunction,
   ) => {
+    if (err instanceof MetaApiCallError) {
+      console.error("Meta API error:", err.message, err.metaError);
+      res.status(502).json({
+        error: err.message,
+        details: {
+          operation: err.operation,
+          meta: err.metaError,
+        },
+      });
+      return;
+    }
     console.error("Error:", err);
     res.status(500).json({ error: "Internal server error" });
   },
@@ -84,6 +108,11 @@ if (process.env.NODE_ENV !== "test") {
       });
       app.listen(Number(PORT), "::", () => {
         console.log(`Meta service running on port ${PORT}`);
+        // Both jobs run on their OWN cadence and delay their first tick, so a
+        // deploy binds its port and passes its health check before any Meta
+        // traffic starts. Neither is ever chained into a launch.
+        startReviewSync();
+        startSpendSync();
       });
     })
     .catch((err) => {
