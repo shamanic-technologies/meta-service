@@ -15,7 +15,8 @@ import accountsRoutes from "./routes/accounts.js";
 import insightsRoutes from "./routes/insights.js";
 import managedRoutes from "./routes/managed.js";
 import internalRoutes from "./routes/internal.js";
-import { MetaApiCallError } from "./lib/meta-ads.js";
+import { ManagedRequestError, MetaApiCallError } from "./lib/meta-ads.js";
+import { PlatformCredentialError } from "./lib/key-service.js";
 import { startReviewSync, startSpendSync } from "./services/crons.js";
 import { serviceKeyAuth } from "./middleware/auth.js";
 import { requireIdentity } from "./middleware/identity.js";
@@ -82,6 +83,22 @@ app.use(
     res: express.Response,
     _next: express.NextFunction,
   ) => {
+    if (err instanceof ManagedRequestError) {
+      console.error("Managed request error:", err.message);
+      res.status(400).json({ error: err.message });
+      return;
+    }
+    // Our own Meta assets are not configured. Name the key: "Internal server
+    // error" tells a caller nothing, and this is the first thing that will be
+    // wrong for as long as the business assets are still being created.
+    if (err instanceof PlatformCredentialError) {
+      console.error("Platform credential error:", err.message);
+      res.status(502).json({
+        error: err.message,
+        details: { provider: err.provider },
+      });
+      return;
+    }
     if (err instanceof MetaApiCallError) {
       console.error("Meta API error:", err.message, err.metaError);
       res.status(502).json({

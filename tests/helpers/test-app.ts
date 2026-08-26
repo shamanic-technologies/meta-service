@@ -8,7 +8,8 @@ import accountsRoutes from "../../src/routes/accounts.js";
 import insightsRoutes from "../../src/routes/insights.js";
 import managedRoutes from "../../src/routes/managed.js";
 import internalRoutes from "../../src/routes/internal.js";
-import { MetaApiCallError } from "../../src/lib/meta-ads.js";
+import { ManagedRequestError, MetaApiCallError } from "../../src/lib/meta-ads.js";
+import { PlatformCredentialError } from "../../src/lib/key-service.js";
 import { serviceKeyAuth } from "../../src/middleware/auth.js";
 import { requireIdentity } from "../../src/middleware/identity.js";
 
@@ -48,6 +49,17 @@ export function createTestApp() {
       res: express.Response,
       _next: express.NextFunction,
     ) => {
+      if (err instanceof ManagedRequestError) {
+        res.status(400).json({ error: err.message });
+        return;
+      }
+      if (err instanceof PlatformCredentialError) {
+        res.status(502).json({
+          error: err.message,
+          details: { provider: err.provider },
+        });
+        return;
+      }
       if (err instanceof MetaApiCallError) {
         res.status(502).json({
           error: err.message,
