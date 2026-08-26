@@ -6,6 +6,9 @@ import authRoutes from "../../src/routes/auth.js";
 import connectionsRoutes from "../../src/routes/connections.js";
 import accountsRoutes from "../../src/routes/accounts.js";
 import insightsRoutes from "../../src/routes/insights.js";
+import managedRoutes from "../../src/routes/managed.js";
+import internalRoutes from "../../src/routes/internal.js";
+import { MetaApiCallError } from "../../src/lib/meta-ads.js";
 import { serviceKeyAuth } from "../../src/middleware/auth.js";
 import { requireIdentity } from "../../src/middleware/identity.js";
 
@@ -23,17 +26,38 @@ export function createTestApp() {
   app.use("/auth/meta/connections", serviceKeyAuth, requireIdentity);
   app.use(authRoutes);
 
+  app.use(serviceKeyAuth, internalRoutes);
+
   // Protected routes (service key + identity required)
   app.use(serviceKeyAuth);
   app.use(requireIdentity);
   app.use(connectionsRoutes);
   app.use(accountsRoutes);
   app.use(insightsRoutes);
+  app.use(managedRoutes);
 
   // 404
   app.use((_req, res) => {
     res.status(404).json({ error: "Not found" });
   });
+
+  app.use(
+    (
+      err: Error,
+      _req: express.Request,
+      res: express.Response,
+      _next: express.NextFunction,
+    ) => {
+      if (err instanceof MetaApiCallError) {
+        res.status(502).json({
+          error: err.message,
+          details: { operation: err.operation, meta: err.metaError },
+        });
+        return;
+      }
+      res.status(500).json({ error: "Internal server error" });
+    },
+  );
 
   return app;
 }
