@@ -16,6 +16,21 @@ export interface CallerContext {
   path: string;
 }
 
+/**
+ * A platform credential could not be resolved. Typed, because "our Meta assets
+ * are not configured yet" is a specific and actionable thing a caller must be
+ * told — a generic 500 says nothing about which key is missing.
+ */
+export class PlatformCredentialError extends Error {
+  readonly provider: string;
+
+  constructor(provider: string, message: string) {
+    super(message);
+    this.name = "PlatformCredentialError";
+    this.provider = provider;
+  }
+}
+
 export async function getPlatformKey(
   provider: string,
   caller: CallerContext,
@@ -23,7 +38,8 @@ export async function getPlatformKey(
 ): Promise<string> {
   const key = await fetchPlatformKey(provider, caller, runId);
   if (key === null) {
-    throw new Error(
+    throw new PlatformCredentialError(
+      provider,
       `key-service has no platform key for provider '${provider}'`,
     );
   }
@@ -57,14 +73,16 @@ async function fetchPlatformKey(
 
   if (!response.ok) {
     const text = await response.text().catch(() => "");
-    throw new Error(
+    throw new PlatformCredentialError(
+      provider,
       `key-service: cannot resolve platform key '${provider}': ${response.status} ${text}`,
     );
   }
 
   const data = (await response.json()) as { key?: string };
   if (!data.key) {
-    throw new Error(
+    throw new PlatformCredentialError(
+      provider,
       `key-service returned no key for platform provider '${provider}'`,
     );
   }

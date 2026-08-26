@@ -51,6 +51,11 @@ launch.
 - **The identity columns on `meta_managed_campaigns` are load-bearing.** Spend is
   declared by a cron, long after the request headers that carried org/user/brand
   are gone, so the row carries them or the cost lands unattributed.
+- **Errors are typed so a caller learns what is wrong.** `PlatformCredentialError`
+  (our Meta assets are not configured — 502, names the key), `ManagedRequestError`
+  (the request cannot be satisfied as written — 400, names the field) and
+  `MetaApiCallError` (Meta refused — 502, carries Meta's code and message). Do
+  not let any of these fall through to the generic 500 handler.
 - **Cost names are NOT registered from here.** They live in costs-service's seed;
   `PUT /v1/providers-costs/{name}` only versions a name that already exists.
 

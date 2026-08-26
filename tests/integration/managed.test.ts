@@ -27,11 +27,15 @@ const metaAdsMock = vi.hoisted(() => ({
   objectiveForGoal: vi.fn(),
   goalsForObjective: vi.fn(),
   MetaApiCallError: class extends Error {},
+  ManagedRequestError: class extends Error {},
 }));
 
 const keyServiceMock = vi.hoisted(() => ({
   getMetaPlatformCredentials: vi.fn(),
   getConversionsApiToken: vi.fn(),
+  PlatformCredentialError: class extends Error {
+    provider = "meta-system-user-token";
+  },
 }));
 
 vi.mock("../../src/db/index.js", () => ({ db: dbMock, sql: { end: vi.fn() } }));
@@ -225,6 +229,40 @@ describe("POST /managed/campaigns", () => {
 
     expect(res.status).toBe(502);
     expect(res.body.error).toContain("create ad creative");
+  });
+
+  it("names the missing platform key instead of a generic 500", async () => {
+    keyServiceMock.getMetaPlatformCredentials.mockRejectedValue(
+      new keyServiceMock.PlatformCredentialError(
+        "key-service has no platform key for provider 'meta-system-user-token'",
+      ),
+    );
+
+    const res = await request(app)
+      .post("/managed/campaigns")
+      .set(getAuthHeaders())
+      .send(VALID_BODY);
+
+    expect(res.status).toBe(502);
+    expect(res.body.error).toContain("meta-system-user-token");
+    expect(res.body.details.provider).toBe("meta-system-user-token");
+  });
+
+  it("says which part of the request cannot be satisfied", async () => {
+    metaAdsMock.buildPromotedObject.mockImplementation(() => {
+      throw new metaAdsMock.ManagedRequestError(
+        "OFFSITE_CONVERSIONS needs a customEventType (the event to optimise on)",
+      );
+    });
+
+    const res = await request(app)
+      .post("/managed/campaigns")
+      .set(getAuthHeaders())
+      .send(VALID_BODY);
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("customEventType");
+    expect(metaAdsMock.createCampaign).not.toHaveBeenCalled();
   });
 
   it("rejects an incoherent age range", async () => {
