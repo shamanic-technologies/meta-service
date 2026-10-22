@@ -23,6 +23,7 @@ import {
 import { getCampaignDailySpend } from "../lib/meta-ads.js";
 import { getMetaPlatformCredentials } from "../lib/key-service.js";
 import { addRunCosts, completeRun, createRun } from "../lib/services.js";
+import { errorMessage } from "../lib/db-error.js";
 
 export const META_ADS_SPEND_COST_NAME = "meta-ads-spend";
 
@@ -137,7 +138,7 @@ export async function ingestCampaignSpend(
         await completeRun(
           run.id,
           "failed",
-          err instanceof Error ? err.message : String(err),
+          errorMessage(err, String(err)),
         );
         throw err;
       }
@@ -216,7 +217,7 @@ export async function runSpendIngest(options: {
       summary.centsDeclared += result.centsDeclared;
     } catch (err) {
       const message = `${campaign.metaCampaignId}: ${
-        err instanceof Error ? err.message : String(err)
+        errorMessage(err, String(err))
       }`;
       console.error(`[meta-service] spend ingest failed for ${message}`);
       summary.errors.push(message);

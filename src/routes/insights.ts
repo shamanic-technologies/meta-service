@@ -13,6 +13,7 @@ import {
   getLimits,
 } from "../lib/rate-limiter.js";
 import { createRun, addRunCosts, completeRun } from "../lib/services.js";
+import { errorMessage } from "../lib/db-error.js";
 
 const router = Router();
 
@@ -184,7 +185,7 @@ router.get("/insights", async (req, res) => {
       await completeRun(
         runId,
         "failed",
-        err instanceof Error ? err.message : "Unknown error",
+        errorMessage(err),
       ).catch(() => {});
     }
     throw err;

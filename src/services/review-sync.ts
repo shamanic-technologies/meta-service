@@ -18,6 +18,7 @@ import {
   TERMINAL_REVIEW_STATUSES,
 } from "../lib/meta-ads.js";
 import { getMetaPlatformCredentials } from "../lib/key-service.js";
+import { errorMessage } from "../lib/db-error.js";
 
 /**
  * Statuses we keep asking about. Anything terminal is left alone — including a
@@ -97,7 +98,7 @@ export async function runReviewSync(): Promise<ReviewSyncSummary> {
       }
     } catch (err) {
       const message = `${ad.metaAdId}: ${
-        err instanceof Error ? err.message : String(err)
+        errorMessage(err, String(err))
       }`;
       console.error(`[meta-service] review sync failed for ${message}`);
       summary.errors.push(message);
