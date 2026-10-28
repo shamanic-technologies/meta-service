@@ -88,6 +88,16 @@ publishable server-side (`POST /orgs/threads/accounts/:id/posts`, text + optiona
   default 30 days, newest first) is what a campaign workflow reads each run for
   spacing, rotation and subjects. No type gate and no queue here: account choice
   and spacing are the workflow's.
+- **What a post led to is measured in social-service, not here (FACTORY-P2-CONTENT-OUTCOMES).**
+  `GET /internal/threads/measurable-posts` (service key, fleet-wide, oldest first, keyset
+  `afterPublishedAt`+`afterId`) lists every MAIN post whose `post_published` landed, with its
+  org and run: social-service reads it, measures each post and declares `post_viewed` /
+  `post_engaged` consuming that `post_published`. The Threads insights API needs the
+  `threads_manage_insights` scope, which our tokens do not carry (403 code 10 on
+  `/{media-id}/insights`, probed 2026-10-29): do not add it to `THREADS_SCOPES` before the
+  Meta app holds that permission, or every new connection fails. A post's link that should
+  credit visits and signups to it carries `dy_post=meta-service:<publication id>`
+  (lead-service reads it off the visit's entry URL).
 - **The Threads tests run on a REAL Postgres** (`tests/integration/threads.test.ts`,
   CI `services: postgres`): locally point `META_SERVICE_DATABASE_URL` at a
   scratch database.

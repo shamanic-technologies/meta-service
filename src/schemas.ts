@@ -992,6 +992,16 @@ export const ThreadsPublicationsQuerySchema = z
     path: ["campaignId"],
   });
 
+export const MeasurablePostsQuerySchema = z.object({
+  since: z.coerce.date().optional().openapi({ description: "ISO date-time, inclusive. Default: 90 days ago" }),
+  afterPublishedAt: z.coerce.date().optional().openapi({ description: "Keyset cursor: the last row's publishedAt (with afterId)" }),
+  afterId: z.string().uuid().optional().openapi({ description: "Keyset cursor: the last row's id (with afterPublishedAt)" }),
+  limit: z.coerce.number().int().min(1).max(1000).default(500),
+}).refine((q) => (q.afterPublishedAt === undefined) === (q.afterId === undefined), {
+  message: "afterPublishedAt and afterId go together",
+  path: ["afterId"],
+});
+
 const ThreadsPublicationSchema = z
   .object({
     id: z.string().uuid(),
@@ -1179,6 +1189,42 @@ registry.registerPath({
       content: {
         "application/json": {
           schema: z.object({ publications: z.array(ThreadsPublicationSchema) }).openapi("ThreadsPublicationList"),
+        },
+      },
+    },
+    400: threadsErrors[400],
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/internal/threads/measurable-posts",
+  summary:
+    "Fleet-wide Threads MAIN posts whose post_published landed on runs-service, oldest first (keyset paged). What social-service measures (views, engagement) and declares outcomes on (FACTORY-P2-CONTENT-OUTCOMES).",
+  security: [{ serviceKeyAuth: [] }],
+  request: {
+    query: z.object({
+      since: z.string().optional().openapi({ description: "ISO date-time, inclusive. Default: 90 days ago" }),
+      afterPublishedAt: z.string().optional().openapi({ description: "Keyset cursor (with afterId): the last row's publishedAt" }),
+      afterId: z.string().optional().openapi({ description: "Keyset cursor (with afterPublishedAt): the last row's id" }),
+      limit: z.string().optional().openapi({ description: "1 to 1000, default 500" }),
+    }),
+  },
+  responses: {
+    200: {
+      description: "Main posts with the org that owns them and when their post_published was declared",
+      content: {
+        "application/json": {
+          schema: z
+            .object({
+              posts: z.array(
+                ThreadsPublicationSchema.extend({
+                  orgId: z.string(),
+                  outcomeDeclaredAt: z.string().openapi({ description: "When post_published landed on runs-service (on runId)" }),
+                }),
+              ),
+            })
+            .openapi("ThreadsMeasurablePostList"),
         },
       },
     },

@@ -522,6 +522,45 @@ describe("Threads publications on record", () => {
   });
 });
 
+describe("Measurable posts (social-service post metrics)", () => {
+  it("lists fleet-wide main posts whose post_published landed, oldest first, keyset paged; replies and undeclared posts absent", async () => {
+    const { body } = await connect("code-alice");
+    let n = 0;
+    const base = defaultThreads();
+    threadsHandler = (url, init) => {
+      if (/^\/v1\.0\/\d+\/threads_publish$/.test(url.pathname)) return { body: { id: `post-${++n}` } };
+      return base(url, init);
+    };
+    const headers = { ...getAuthHeaders(), "x-run-id": "33333333-3333-3333-3333-333333333333", "x-brand-id": BRAND };
+    const first = await request(app).post(`/orgs/threads/accounts/${body.account.id}/posts`).set(headers).send({ text: "First" });
+    await request(app).post(`/orgs/threads/accounts/${body.account.id}/posts`).set(headers).send({ text: "Reply", replyToPostId: first.body.postId });
+    const second = await request(app).post(`/orgs/threads/accounts/${body.account.id}/posts`).set(headers).send({ text: "Second" });
+    runsStatus = 422;
+    await request(app).post(`/orgs/threads/accounts/${body.account.id}/posts`).set(headers).send({ text: "Undeclared" });
+
+    const key = { "x-api-key": "test-service-key" };
+    const all = await request(app).get("/internal/threads/measurable-posts").set(key);
+    expect(all.status).toBe(200);
+    expect(all.body.posts.map((p: any) => p.text)).toEqual(["First", "Second"]);
+    expect(all.body.posts[0]).toMatchObject({
+      id: first.body.publicationId,
+      orgId: "test-org-id",
+      runId: "33333333-3333-3333-3333-333333333333",
+      kind: "post",
+    });
+    expect(typeof all.body.posts[0].outcomeDeclaredAt).toBe("string");
+
+    const page = await request(app)
+      .get("/internal/threads/measurable-posts")
+      .query({ limit: 1, afterPublishedAt: all.body.posts[0].publishedAt, afterId: all.body.posts[0].id })
+      .set(key);
+    expect(page.body.posts.map((p: any) => p.id)).toEqual([second.body.publicationId]);
+
+    const half = await request(app).get("/internal/threads/measurable-posts").query({ afterId: first.body.publicationId }).set(key);
+    expect(half.status).toBe(400);
+  });
+});
+
 describe("Threads token refresh", () => {
   async function seed(overrides: Partial<typeof threadsAccounts.$inferInsert>) {
     const [row] = await db
