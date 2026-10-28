@@ -282,3 +282,76 @@ export type MetaManagedAd = typeof metaManagedAds.$inferSelect;
 export type NewMetaManagedAd = typeof metaManagedAds.$inferInsert;
 export type MetaAdsSpendDaily = typeof metaAdsSpendDaily.$inferSelect;
 export type NewMetaAdsSpendDaily = typeof metaAdsSpendDaily.$inferInsert;
+
+// ==================== Threads accounts ====================
+//
+// A Threads account a user connected for one of their brands, through Threads'
+// own OAuth on our Meta app. Any number per brand, of any type; the same Threads
+// account connected twice on a brand is ONE row (the unique key below), so a
+// reconnect refreshes the token in place instead of adding a duplicate.
+
+export const threadsAccounts = pgTable(
+  "threads_accounts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: text("org_id").notNull(),
+    brandId: text("brand_id").notNull(),
+    // Who connected it last. The account belongs to the brand, not to them.
+    connectedByUserId: text("connected_by_user_id").notNull(),
+    threadsUserId: text("threads_user_id").notNull(),
+    username: text("username").notNull(),
+    name: text("name"),
+    profilePictureUrl: text("profile_picture_url"),
+    // pro_human | personal_human | pro_ai (src/lib/threads-accounts.ts)
+    accountType: text("account_type").notNull(),
+    accessToken: text("access_token").notNull(), // encrypted at rest
+    tokenIssuedAt: timestamp("token_issued_at", { withTimezone: true }).notNull(),
+    tokenExpiresAt: timestamp("token_expires_at", { withTimezone: true }).notNull(),
+    scopes: text("scopes").array().notNull(),
+    // connected | needs_reconnect — set by whoever observed the token die.
+    status: text("status").notNull().default("connected"),
+    statusReason: text("status_reason"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("idx_threads_accounts_org_brand").on(table.orgId, table.brandId),
+    index("idx_threads_accounts_token_expires").on(table.tokenExpiresAt),
+    unique("uq_threads_accounts_brand_user").on(
+      table.orgId,
+      table.brandId,
+      table.threadsUserId,
+    ),
+  ],
+);
+
+/**
+ * A Threads login in flight: the random `state` handed to Threads, and what the
+ * caller asked for when they started it. Single use, short-lived, and bound to
+ * the org that started it, so a callback can never land an account in another
+ * org.
+ */
+export const threadsOauthPending = pgTable(
+  "threads_oauth_pending",
+  {
+    state: text("state").primaryKey(),
+    orgId: text("org_id").notNull(),
+    userId: text("user_id").notNull(),
+    brandId: text("brand_id").notNull(),
+    accountType: text("account_type").notNull(),
+    redirectUri: text("redirect_uri").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index("idx_threads_oauth_pending_expires").on(table.expiresAt)],
+);
+
+export type ThreadsAccount = typeof threadsAccounts.$inferSelect;
+export type NewThreadsAccount = typeof threadsAccounts.$inferInsert;
+export type ThreadsOauthPending = typeof threadsOauthPending.$inferSelect;

@@ -908,6 +908,244 @@
           "eventTime",
           "userData"
         ]
+      },
+      "ThreadsConnectStartResponse": {
+        "type": "object",
+        "properties": {
+          "authorizationUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "Send the user here to log into Threads"
+          },
+          "state": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string",
+            "description": "The login must finish before this time (15 minutes)"
+          }
+        },
+        "required": [
+          "authorizationUrl",
+          "state",
+          "expiresAt"
+        ]
+      },
+      "ThreadsConnectStart": {
+        "type": "object",
+        "properties": {
+          "brandId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Brand the account is connected to"
+          },
+          "accountType": {
+            "$ref": "#/components/schemas/AccountType"
+          },
+          "redirectUri": {
+            "type": "string",
+            "format": "uri",
+            "description": "Page Threads sends the user back to with `code` and `state`. Must be registered, byte for byte, as a redirect callback URL of our Threads app."
+          }
+        },
+        "required": [
+          "brandId",
+          "accountType",
+          "redirectUri"
+        ]
+      },
+      "AccountType": {
+        "type": "string",
+        "enum": [
+          "pro_human",
+          "personal_human",
+          "pro_ai"
+        ],
+        "description": "Who runs the account: `pro_human` = Pro (human), `personal_human` = Personal (human), `pro_ai` = Pro (AI)"
+      },
+      "ThreadsConnectCallbackResponse": {
+        "type": "object",
+        "properties": {
+          "account": {
+            "$ref": "#/components/schemas/ThreadsAccount"
+          },
+          "created": {
+            "type": "boolean",
+            "description": "false when this Threads account was already connected to the brand: it was refreshed, not duplicated"
+          }
+        },
+        "required": [
+          "account",
+          "created"
+        ]
+      },
+      "ThreadsAccount": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "brandId": {
+            "type": "string"
+          },
+          "threadsUserId": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "profilePictureUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "profileUrl": {
+            "type": "string"
+          },
+          "accountType": {
+            "$ref": "#/components/schemas/AccountType"
+          },
+          "accountTypeLabel": {
+            "type": "string",
+            "description": "Human label of accountType, e.g. Pro (AI)"
+          },
+          "health": {
+            "type": "string",
+            "enum": [
+              "connected",
+              "needs_reconnect"
+            ],
+            "description": "`needs_reconnect` = Threads no longer accepts this login; a human must connect it again"
+          },
+          "healthReason": {
+            "type": "string",
+            "nullable": true,
+            "description": "Plain-language reason when health is needs_reconnect"
+          },
+          "tokenExpiresAt": {
+            "type": "string"
+          },
+          "connectedByUserId": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "brandId",
+          "threadsUserId",
+          "username",
+          "name",
+          "profilePictureUrl",
+          "profileUrl",
+          "accountType",
+          "accountTypeLabel",
+          "health",
+          "healthReason",
+          "tokenExpiresAt",
+          "connectedByUserId",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "ThreadsConnectCallback": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1,
+            "description": "`code` from Threads' redirect"
+          },
+          "state": {
+            "type": "string",
+            "minLength": 1,
+            "description": "`state` from Threads' redirect"
+          }
+        },
+        "required": [
+          "code",
+          "state"
+        ]
+      },
+      "ThreadsAccountList": {
+        "type": "object",
+        "properties": {
+          "accounts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ThreadsAccount"
+            }
+          }
+        },
+        "required": [
+          "accounts"
+        ]
+      },
+      "ThreadsAccountUpdate": {
+        "type": "object",
+        "properties": {
+          "accountType": {
+            "$ref": "#/components/schemas/AccountType"
+          }
+        },
+        "required": [
+          "accountType"
+        ]
+      },
+      "ThreadsPublishResponse": {
+        "type": "object",
+        "properties": {
+          "accountId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "postId": {
+            "type": "string",
+            "description": "Threads media id of the published post"
+          },
+          "permalink": {
+            "type": "string",
+            "nullable": true
+          },
+          "replyToPostId": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "accountId",
+          "postId",
+          "permalink",
+          "replyToPostId"
+        ]
+      },
+      "ThreadsPublish": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "Post text, at most 500 characters (Threads' limit)"
+          },
+          "replyToPostId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Publish as a reply under this Threads post id (e.g. the postId a previous call returned)"
+          }
+        },
+        "required": [
+          "text"
+        ]
       }
     },
     "parameters": {}
@@ -2269,6 +2507,532 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/orgs/threads/auth/start": {
+      "post": {
+        "summary": "Start connecting a Threads account to a brand: returns the Threads login URL",
+        "security": [
+          {
+            "serviceKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Internal org UUID"
+            },
+            "required": true,
+            "description": "Internal org UUID",
+            "name": "x-org-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Internal user UUID"
+            },
+            "required": true,
+            "description": "Internal user UUID",
+            "name": "x-user-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Caller's run ID"
+            },
+            "required": true,
+            "description": "Caller's run ID",
+            "name": "x-run-id",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ThreadsConnectStart"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Threads login URL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadsConnectStartResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request cannot be satisfied as written (names the field or the reason)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Threads refused the call (carries Threads' code and message), or our Threads app credentials are not configured (names the key)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/orgs/threads/auth/callback": {
+      "post": {
+        "summary": "Finish a Threads login: stores the account (or refreshes it when already connected to the brand)",
+        "security": [
+          {
+            "serviceKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Internal org UUID"
+            },
+            "required": true,
+            "description": "Internal org UUID",
+            "name": "x-org-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Internal user UUID"
+            },
+            "required": true,
+            "description": "Internal user UUID",
+            "name": "x-user-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Caller's run ID"
+            },
+            "required": true,
+            "description": "Caller's run ID",
+            "name": "x-run-id",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ThreadsConnectCallback"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Connected account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadsConnectCallbackResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request cannot be satisfied as written (names the field or the reason)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Threads refused the call (carries Threads' code and message), or our Threads app credentials are not configured (names the key)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/orgs/threads/accounts": {
+      "get": {
+        "summary": "List the connected Threads accounts of the org, or of one brand",
+        "security": [
+          {
+            "serviceKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "brandId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Internal org UUID"
+            },
+            "required": true,
+            "description": "Internal org UUID",
+            "name": "x-org-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Internal user UUID"
+            },
+            "required": true,
+            "description": "Internal user UUID",
+            "name": "x-user-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Caller's run ID"
+            },
+            "required": true,
+            "description": "Caller's run ID",
+            "name": "x-run-id",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Connected Threads accounts, oldest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadsAccountList"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/orgs/threads/accounts/{id}": {
+      "patch": {
+        "summary": "Change a connected Threads account's type",
+        "security": [
+          {
+            "serviceKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Internal org UUID"
+            },
+            "required": true,
+            "description": "Internal org UUID",
+            "name": "x-org-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Internal user UUID"
+            },
+            "required": true,
+            "description": "Internal user UUID",
+            "name": "x-user-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Caller's run ID"
+            },
+            "required": true,
+            "description": "Caller's run ID",
+            "name": "x-run-id",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ThreadsAccountUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "account": {
+                      "$ref": "#/components/schemas/ThreadsAccount"
+                    }
+                  },
+                  "required": [
+                    "account"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request cannot be satisfied as written (names the field or the reason)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such Threads account in this org",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Disconnect a Threads account",
+        "security": [
+          {
+            "serviceKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Internal org UUID"
+            },
+            "required": true,
+            "description": "Internal org UUID",
+            "name": "x-org-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Internal user UUID"
+            },
+            "required": true,
+            "description": "Internal user UUID",
+            "name": "x-user-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Caller's run ID"
+            },
+            "required": true,
+            "description": "Caller's run ID",
+            "name": "x-run-id",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Disconnected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such Threads account in this org",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/orgs/threads/accounts/{id}/posts": {
+      "post": {
+        "summary": "Publish a text post, or a reply under a post, on a connected Threads account",
+        "security": [
+          {
+            "serviceKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Internal org UUID"
+            },
+            "required": true,
+            "description": "Internal org UUID",
+            "name": "x-org-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Internal user UUID"
+            },
+            "required": true,
+            "description": "Internal user UUID",
+            "name": "x-user-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Caller's run ID"
+            },
+            "required": true,
+            "description": "Caller's run ID",
+            "name": "x-run-id",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ThreadsPublish"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Published",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadsPublishResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request cannot be satisfied as written (names the field or the reason)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such Threads account in this org",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The account needs to be reconnected (Threads no longer accepts its login). Body carries `reason: needs_reconnect` and `accountId`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Threads refused the call (carries Threads' code and message), or our Threads app credentials are not configured (names the key)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/threads/token-refresh": {
+      "post": {
+        "summary": "Run the Threads token refresh now. The same work its cron does twice a day: refreshes tokens nearing expiry, marks dead ones needs_reconnect.",
+        "security": [
+          {
+            "serviceKeyAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Token refresh summary"
           }
         }
       }

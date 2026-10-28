@@ -11,6 +11,7 @@
 import { Router } from "express";
 import { runReviewSync } from "../services/review-sync.js";
 import { runSpendIngest } from "../services/spend-ingest.js";
+import { runTokenRefresh } from "../lib/threads-accounts.js";
 
 const router = Router();
 
@@ -31,6 +32,14 @@ router.post("/internal/spend-sync", async (req, res, next) => {
       return;
     }
     res.json(await runSpendIngest({ lookbackDays }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post("/internal/threads/token-refresh", async (_req, res, next) => {
+  try {
+    res.json(await runTokenRefresh());
   } catch (err) {
     next(err);
   }
