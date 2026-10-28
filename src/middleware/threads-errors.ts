@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
 import { ThreadsApiError } from "../lib/threads-client.js";
+import { ThreadsPublishConflictError } from "../lib/threads-publications.js";
 import {
   ThreadsReconnectRequiredError,
   ThreadsRequestError,
@@ -26,6 +27,14 @@ export function threadsErrorHandler(
       error: err.message,
       reason: "needs_reconnect",
       accountId: err.accountId,
+    });
+    return;
+  }
+  if (err instanceof ThreadsPublishConflictError) {
+    res.status(409).json({
+      error: err.message,
+      reason: err.reason,
+      publicationId: err.publicationId,
     });
     return;
   }

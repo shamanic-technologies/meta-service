@@ -1119,13 +1119,69 @@
           "replyToPostId": {
             "type": "string",
             "nullable": true
+          },
+          "publicationId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "This service's record of the publication (the outcome's subject)"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "post",
+              "reply"
+            ],
+            "description": "`post` = a main post (one `post_published` outcome); `reply` = a reply under a post (part of its thread, no outcome)"
+          },
+          "threadRootPostId": {
+            "type": "string",
+            "description": "Threads id of the main post of this thread (itself for a post)"
+          },
+          "publishedAt": {
+            "type": "string"
+          },
+          "replayed": {
+            "type": "boolean",
+            "description": "true when the idempotency key had already published this: nothing was published again"
+          },
+          "outcome": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "outcomeKey": {
+                "type": "string",
+                "enum": [
+                  "post_published"
+                ]
+              },
+              "declared": {
+                "type": "boolean",
+                "description": "false = runs-service refused or was unreachable; retried by the next call with the same idempotency key"
+              },
+              "error": {
+                "type": "string",
+                "nullable": true
+              }
+            },
+            "required": [
+              "outcomeKey",
+              "declared",
+              "error"
+            ],
+            "description": "The `post_published` outcome declared on the caller's run (x-run-id), main posts only; null for a reply"
           }
         },
         "required": [
           "accountId",
           "postId",
           "permalink",
-          "replyToPostId"
+          "replyToPostId",
+          "publicationId",
+          "kind",
+          "threadRootPostId",
+          "publishedAt",
+          "replayed",
+          "outcome"
         ]
       },
       "ThreadsPublish": {
@@ -1141,10 +1197,108 @@
             "type": "string",
             "minLength": 1,
             "description": "Publish as a reply under this Threads post id (e.g. the postId a previous call returned)"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "description": "Caller's own key, unique per org. The same key again answers the publication it already made (200, `replayed: true`) and never calls Threads twice. The same key with another account, text or parent post is a 409 `idempotency_key_reused`."
           }
         },
         "required": [
           "text"
+        ]
+      },
+      "ThreadsPublicationList": {
+        "type": "object",
+        "properties": {
+          "publications": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ThreadsPublication"
+            }
+          }
+        },
+        "required": [
+          "publications"
+        ]
+      },
+      "ThreadsPublication": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "accountId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "accountUsername": {
+            "type": "string"
+          },
+          "accountType": {
+            "$ref": "#/components/schemas/AccountType"
+          },
+          "brandId": {
+            "type": "string"
+          },
+          "campaignId": {
+            "type": "string",
+            "nullable": true
+          },
+          "runId": {
+            "type": "string"
+          },
+          "userId": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "post",
+              "reply"
+            ],
+            "description": "`post` = a main post (one `post_published` outcome); `reply` = a reply under a post (part of its thread, no outcome)"
+          },
+          "replyToPostId": {
+            "type": "string",
+            "nullable": true
+          },
+          "threadRootPostId": {
+            "type": "string",
+            "nullable": true
+          },
+          "postId": {
+            "type": "string"
+          },
+          "permalink": {
+            "type": "string",
+            "nullable": true
+          },
+          "text": {
+            "type": "string"
+          },
+          "publishedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "accountId",
+          "accountUsername",
+          "accountType",
+          "brandId",
+          "campaignId",
+          "runId",
+          "userId",
+          "kind",
+          "replyToPostId",
+          "threadRootPostId",
+          "postId",
+          "permalink",
+          "text",
+          "publishedAt"
         ]
       }
     },
@@ -2912,7 +3066,8 @@
     },
     "/orgs/threads/accounts/{id}/posts": {
       "post": {
-        "summary": "Publish a text post, or a reply under a post, on a connected Threads account",
+        "summary": "Publish a text post, or a reply under a post, on a connected Threads account (kept on record, idempotent on the caller's key)",
+        "description": "Every publication is kept (account, brand, org, user, run, campaign, kind, parent post, text, permalink, time). A main post declares ONE `post_published` outcome on the caller's run (x-run-id), subject = the publication; a reply declares none. The Threads API is free: no cost.",
         "security": [
           {
             "serviceKeyAuth": []
@@ -2957,6 +3112,26 @@
             "description": "Caller's run ID",
             "name": "x-run-id",
             "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Campaign the publication is made for (kept on the record, read back by campaign)"
+            },
+            "required": false,
+            "description": "Campaign the publication is made for (kept on the record, read back by campaign)",
+            "name": "x-campaign-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Caller's brand (the record keeps the ACCOUNT's brand)"
+            },
+            "required": false,
+            "description": "Caller's brand (the record keeps the ACCOUNT's brand)",
+            "name": "x-brand-id",
+            "in": "header"
           }
         ],
         "requestBody": {
@@ -2969,6 +3144,16 @@
           }
         },
         "responses": {
+          "200": {
+            "description": "Already published with this idempotency key: the same publication, nothing published again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadsPublishResponse"
+                }
+              }
+            }
+          },
           "201": {
             "description": "Published",
             "content": {
@@ -3000,7 +3185,7 @@
             }
           },
           "409": {
-            "description": "The account needs to be reconnected (Threads no longer accepts its login). Body carries `reason: needs_reconnect` and `accountId`.",
+            "description": "`reason: needs_reconnect` (+ `accountId`): Threads no longer accepts the account's login. `reason: idempotency_key_reused` / `publish_in_progress` (+ `publicationId`): the key names another publication, or its publish is still in flight.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3011,6 +3196,118 @@
           },
           "502": {
             "description": "Threads refused the call (carries Threads' code and message), or our Threads app credentials are not configured (names the key)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/orgs/threads/publications": {
+      "get": {
+        "summary": "List the Threads publications of one campaign and/or one brand over a time window, newest first",
+        "security": [
+          {
+            "serviceKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "At least one of campaignId, brandId"
+            },
+            "required": false,
+            "description": "At least one of campaignId, brandId",
+            "name": "campaignId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "brandId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "ISO date-time, inclusive. Default: 30 days ago"
+            },
+            "required": false,
+            "description": "ISO date-time, inclusive. Default: 30 days ago",
+            "name": "since",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "ISO date-time, inclusive. Default: now"
+            },
+            "required": false,
+            "description": "ISO date-time, inclusive. Default: now",
+            "name": "until",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "1 to 1000, default 200"
+            },
+            "required": false,
+            "description": "1 to 1000, default 200",
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Internal org UUID"
+            },
+            "required": true,
+            "description": "Internal org UUID",
+            "name": "x-org-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Internal user UUID"
+            },
+            "required": true,
+            "description": "Internal user UUID",
+            "name": "x-user-id",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Caller's run ID"
+            },
+            "required": true,
+            "description": "Caller's run ID",
+            "name": "x-run-id",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Publications (posts and replies) of the org matching the filters, newest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadsPublicationList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request cannot be satisfied as written (names the field or the reason)",
             "content": {
               "application/json": {
                 "schema": {
