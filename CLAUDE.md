@@ -24,6 +24,16 @@ older per-user OAuth path, where a user authorises their own Meta account. It
 stays for whatever already uses it, and it is never involved in a managed
 launch.
 
+**Threads accounts (`/orgs/threads/*`).** Any user connects any number of
+Threads accounts to a brand through Threads' own OAuth on our Meta app (platform
+keys `threads-app-id`, `threads-app-secret`). The page Threads redirects to is
+the CALLER's (the dashboard), which posts `code` + `state` back to
+`/orgs/threads/auth/callback`; meta-service has no public hostname, so it never
+receives a browser redirect. Each account carries the owner's account type
+(`pro_human` | `personal_human` | `pro_ai`, `src/lib/account-types.ts`), is
+publishable server-side (`POST /orgs/threads/accounts/:id/posts`, text + optional
+`replyToPostId`), and its long-lived token is refreshed by its own cron.
+
 ## Invariants worth not relearning
 
 - **Ads are TEXT ONLY.** `createLinkCreative` sends `link_data` with no
@@ -56,6 +66,14 @@ launch.
   (the request cannot be satisfied as written — 400, names the field) and
   `MetaApiCallError` (Meta refused — 502, carries Meta's code and message). Do
   not let any of these fall through to the generic 500 handler.
+- **One Threads account per brand is ONE row** (unique org + brand + Threads
+  user id): a reconnect refreshes it in place. A token Threads refuses (code
+  190/102) flips the account to `needs_reconnect` with a plain reason, and a
+  publish on it is a 409 `reason: needs_reconnect`, never a 500. The Threads API
+  is free: publishing declares no cost.
+- **The Threads tests run on a REAL Postgres** (`tests/integration/threads.test.ts`,
+  CI `services: postgres`): locally point `META_SERVICE_DATABASE_URL` at a
+  scratch database.
 - **Cost names are NOT registered from here.** They live in costs-service's seed;
   `PUT /v1/providers-costs/{name}` only versions a name that already exists.
 

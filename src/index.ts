@@ -14,10 +14,16 @@ import connectionsRoutes from "./routes/connections.js";
 import accountsRoutes from "./routes/accounts.js";
 import insightsRoutes from "./routes/insights.js";
 import managedRoutes from "./routes/managed.js";
+import threadsRoutes from "./routes/threads.js";
+import { threadsErrorHandler } from "./middleware/threads-errors.js";
 import internalRoutes from "./routes/internal.js";
 import { ManagedRequestError, MetaApiCallError } from "./lib/meta-ads.js";
 import { PlatformCredentialError } from "./lib/key-service.js";
-import { startReviewSync, startSpendSync } from "./services/crons.js";
+import {
+  startReviewSync,
+  startSpendSync,
+  startThreadsTokenRefresh,
+} from "./services/crons.js";
 import { serviceKeyAuth } from "./middleware/auth.js";
 import { requireIdentity } from "./middleware/identity.js";
 
@@ -61,6 +67,7 @@ app.use(connectionsRoutes);
 app.use(accountsRoutes);
 app.use(insightsRoutes);
 app.use(managedRoutes);
+app.use(threadsRoutes);
 
 // 404
 app.use((_req, res) => {
@@ -69,6 +76,8 @@ app.use((_req, res) => {
 
 // Sentry error handler
 Sentry.setupExpressErrorHandler(app);
+
+app.use(threadsErrorHandler);
 
 // Fallback error handler.
 //
@@ -130,6 +139,7 @@ if (process.env.NODE_ENV !== "test") {
         // traffic starts. Neither is ever chained into a launch.
         startReviewSync();
         startSpendSync();
+        startThreadsTokenRefresh();
       });
     })
     .catch((err) => {

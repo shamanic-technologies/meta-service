@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ACCOUNT_TYPES, ACCOUNT_TYPE_VALUES } from "./lib/account-types.js";
 import {
   OpenAPIRegistry,
   extendZodWithOpenApi,
@@ -856,5 +857,249 @@ registry.registerPath({
       description: "Ingest failed",
       content: { "application/json": { schema: ErrorResponseSchema } },
     },
+  },
+});
+
+// ==================== Threads accounts ====================
+//
+// Any user connects any number of Threads accounts to a brand through Threads'
+// own login. The dashboard page that receives Threads' redirect hands the
+// `code` and `state` back to POST /orgs/threads/auth/callback.
+
+const accountTypeDescription = `Who runs the account: ${Object.entries(ACCOUNT_TYPES)
+  .map(([value, label]) => `\`${value}\` = ${label}`)
+  .join(", ")}`;
+
+export const AccountTypeSchema = z
+  .enum(ACCOUNT_TYPE_VALUES)
+  .openapi("AccountType", { description: accountTypeDescription });
+
+export const ThreadsConnectStartSchema = z
+  .object({
+    brandId: z.string().min(1).openapi({ description: "Brand the account is connected to" }),
+    accountType: AccountTypeSchema,
+    redirectUri: z.string().url().openapi({
+      description:
+        "Page Threads sends the user back to with `code` and `state`. Must be registered, byte for byte, as a redirect callback URL of our Threads app.",
+    }),
+  })
+  .openapi("ThreadsConnectStart");
+
+const ThreadsConnectStartResponseSchema = z
+  .object({
+    authorizationUrl: z.string().url().openapi({ description: "Send the user here to log into Threads" }),
+    state: z.string(),
+    expiresAt: z.string().openapi({ description: "The login must finish before this time (15 minutes)" }),
+  })
+  .openapi("ThreadsConnectStartResponse");
+
+export const ThreadsConnectCallbackSchema = z
+  .object({
+    code: z.string().min(1).openapi({ description: "`code` from Threads' redirect" }),
+    state: z.string().min(1).openapi({ description: "`state` from Threads' redirect" }),
+  })
+  .openapi("ThreadsConnectCallback");
+
+const ThreadsAccountSchema = z
+  .object({
+    id: z.string().uuid(),
+    brandId: z.string(),
+    threadsUserId: z.string(),
+    username: z.string(),
+    name: z.string().nullable(),
+    profilePictureUrl: z.string().nullable(),
+    profileUrl: z.string(),
+    accountType: AccountTypeSchema,
+    accountTypeLabel: z.string().openapi({ description: "Human label of accountType, e.g. Pro (AI)" }),
+    health: z.enum(["connected", "needs_reconnect"]).openapi({
+      description: "`needs_reconnect` = Threads no longer accepts this login; a human must connect it again",
+    }),
+    healthReason: z.string().nullable().openapi({ description: "Plain-language reason when health is needs_reconnect" }),
+    tokenExpiresAt: z.string(),
+    connectedByUserId: z.string(),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  })
+  .openapi("ThreadsAccount");
+
+const ThreadsConnectCallbackResponseSchema = z
+  .object({
+    account: ThreadsAccountSchema,
+    created: z.boolean().openapi({
+      description: "false when this Threads account was already connected to the brand: it was refreshed, not duplicated",
+    }),
+  })
+  .openapi("ThreadsConnectCallbackResponse");
+
+export const ThreadsAccountUpdateSchema = z
+  .object({ accountType: AccountTypeSchema })
+  .openapi("ThreadsAccountUpdate");
+
+export const ThreadsPublishSchema = z
+  .object({
+    text: z.string().min(1).max(500).openapi({ description: "Post text, at most 500 characters (Threads' limit)" }),
+    replyToPostId: z.string().min(1).optional().openapi({
+      description: "Publish as a reply under this Threads post id (e.g. the postId a previous call returned)",
+    }),
+  })
+  .openapi("ThreadsPublish");
+
+const ThreadsPublishResponseSchema = z
+  .object({
+    accountId: z.string().uuid(),
+    postId: z.string().openapi({ description: "Threads media id of the published post" }),
+    permalink: z.string().nullable(),
+    replyToPostId: z.string().nullable(),
+  })
+  .openapi("ThreadsPublishResponse");
+
+const threadsErrors = {
+  400: {
+    description: "The request cannot be satisfied as written (names the field or the reason)",
+    content: { "application/json": { schema: ErrorResponseSchema } },
+  },
+  502: {
+    description:
+      "Threads refused the call (carries Threads' code and message), or our Threads app credentials are not configured (names the key)",
+    content: { "application/json": { schema: ErrorResponseSchema } },
+  },
+};
+
+const notFound = {
+  404: {
+    description: "No such Threads account in this org",
+    content: { "application/json": { schema: ErrorResponseSchema } },
+  },
+};
+
+registry.registerPath({
+  method: "post",
+  path: "/orgs/threads/auth/start",
+  summary: "Start connecting a Threads account to a brand: returns the Threads login URL",
+  security: [{ serviceKeyAuth: [] }],
+  request: {
+    headers: IdentityHeadersSchema,
+    body: { content: { "application/json": { schema: ThreadsConnectStartSchema } } },
+  },
+  responses: {
+    200: {
+      description: "Threads login URL",
+      content: { "application/json": { schema: ThreadsConnectStartResponseSchema } },
+    },
+    ...threadsErrors,
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/orgs/threads/auth/callback",
+  summary:
+    "Finish a Threads login: stores the account (or refreshes it when already connected to the brand)",
+  security: [{ serviceKeyAuth: [] }],
+  request: {
+    headers: IdentityHeadersSchema,
+    body: { content: { "application/json": { schema: ThreadsConnectCallbackSchema } } },
+  },
+  responses: {
+    200: {
+      description: "Connected account",
+      content: { "application/json": { schema: ThreadsConnectCallbackResponseSchema } },
+    },
+    ...threadsErrors,
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/orgs/threads/accounts",
+  summary: "List the connected Threads accounts of the org, or of one brand",
+  security: [{ serviceKeyAuth: [] }],
+  request: {
+    headers: IdentityHeadersSchema,
+    query: z.object({ brandId: z.string().optional() }),
+  },
+  responses: {
+    200: {
+      description: "Connected Threads accounts, oldest first",
+      content: {
+        "application/json": {
+          schema: z.object({ accounts: z.array(ThreadsAccountSchema) }).openapi("ThreadsAccountList"),
+        },
+      },
+    },
+  },
+});
+
+registry.registerPath({
+  method: "patch",
+  path: "/orgs/threads/accounts/{id}",
+  summary: "Change a connected Threads account's type",
+  security: [{ serviceKeyAuth: [] }],
+  request: {
+    headers: IdentityHeadersSchema,
+    params: z.object({ id: z.string().uuid() }),
+    body: { content: { "application/json": { schema: ThreadsAccountUpdateSchema } } },
+  },
+  responses: {
+    200: {
+      description: "Updated account",
+      content: { "application/json": { schema: z.object({ account: ThreadsAccountSchema }) } },
+    },
+    ...notFound,
+    400: threadsErrors[400],
+  },
+});
+
+registry.registerPath({
+  method: "delete",
+  path: "/orgs/threads/accounts/{id}",
+  summary: "Disconnect a Threads account",
+  security: [{ serviceKeyAuth: [] }],
+  request: {
+    headers: IdentityHeadersSchema,
+    params: z.object({ id: z.string().uuid() }),
+  },
+  responses: {
+    200: {
+      description: "Disconnected",
+      content: { "application/json": { schema: MessageResponseSchema } },
+    },
+    ...notFound,
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/orgs/threads/accounts/{id}/posts",
+  summary: "Publish a text post, or a reply under a post, on a connected Threads account",
+  security: [{ serviceKeyAuth: [] }],
+  request: {
+    headers: IdentityHeadersSchema,
+    params: z.object({ id: z.string().uuid() }),
+    body: { content: { "application/json": { schema: ThreadsPublishSchema } } },
+  },
+  responses: {
+    201: {
+      description: "Published",
+      content: { "application/json": { schema: ThreadsPublishResponseSchema } },
+    },
+    ...notFound,
+    409: {
+      description:
+        "The account needs to be reconnected (Threads no longer accepts its login). Body carries `reason: needs_reconnect` and `accountId`.",
+      content: { "application/json": { schema: ErrorResponseSchema } },
+    },
+    ...threadsErrors,
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/internal/threads/token-refresh",
+  summary:
+    "Run the Threads token refresh now. The same work its cron does twice a day: refreshes tokens nearing expiry, marks dead ones needs_reconnect.",
+  security: [{ serviceKeyAuth: [] }],
+  responses: {
+    200: { description: "Token refresh summary" },
   },
 });

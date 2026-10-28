@@ -12,6 +12,7 @@
  */
 import { runReviewSync } from "./review-sync.js";
 import { runSpendIngest } from "./spend-ingest.js";
+import { runTokenRefresh } from "../lib/threads-accounts.js";
 
 const MINUTE = 60 * 1000;
 const HOUR = 60 * MINUTE;
@@ -65,6 +66,33 @@ export function startSpendSync(): NodeJS.Timeout {
         );
       })
       .catch((err) => console.error("[meta-service] spend sync failed:", err));
+  };
+
+  setTimeout(tick, firstTickMinutes * MINUTE);
+  return setInterval(tick, intervalHours * HOUR);
+}
+
+/**
+ * Threads long-lived tokens last 60 days and die silently unless refreshed. Twice
+ * a day is far more often than needed (a token is picked up 30 days before
+ * expiry), so a missed tick or a long outage never costs a connection.
+ */
+export function startThreadsTokenRefresh(): NodeJS.Timeout {
+  const intervalHours = numberFromEnv("THREADS_TOKEN_REFRESH_INTERVAL_HOURS", 12);
+  const firstTickMinutes = numberFromEnv("THREADS_TOKEN_REFRESH_FIRST_TICK_MINUTES", 3);
+
+  console.log(
+    `[meta-service] threads token refresh every ${intervalHours}h, first tick in ${firstTickMinutes}min`,
+  );
+
+  const tick = () => {
+    runTokenRefresh()
+      .then((summary) => {
+        console.log(
+          `[meta-service] threads token refresh: checked=${summary.accountsChecked} refreshed=${summary.refreshed} needsReconnect=${summary.needsReconnect} errors=${summary.errors.length}`,
+        );
+      })
+      .catch((err) => console.error("[meta-service] threads token refresh failed:", err));
   };
 
   setTimeout(tick, firstTickMinutes * MINUTE);
