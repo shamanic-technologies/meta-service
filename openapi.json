@@ -1300,6 +1300,40 @@
           "text",
           "publishedAt"
         ]
+      },
+      "ThreadsMeasurablePostList": {
+        "type": "object",
+        "properties": {
+          "posts": {
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/ThreadsPublication"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "orgId": {
+                      "type": "string"
+                    },
+                    "outcomeDeclaredAt": {
+                      "type": "string",
+                      "description": "When post_published landed on runs-service (on runId)"
+                    }
+                  },
+                  "required": [
+                    "orgId",
+                    "outcomeDeclaredAt"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "posts"
+        ]
       }
     },
     "parameters": {}
@@ -3302,6 +3336,80 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ThreadsPublicationList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request cannot be satisfied as written (names the field or the reason)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/threads/measurable-posts": {
+      "get": {
+        "summary": "Fleet-wide Threads MAIN posts whose post_published landed on runs-service, oldest first (keyset paged). What social-service measures (views, engagement) and declares outcomes on (FACTORY-P2-CONTENT-OUTCOMES).",
+        "security": [
+          {
+            "serviceKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "ISO date-time, inclusive. Default: 90 days ago"
+            },
+            "required": false,
+            "description": "ISO date-time, inclusive. Default: 90 days ago",
+            "name": "since",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Keyset cursor (with afterId): the last row's publishedAt"
+            },
+            "required": false,
+            "description": "Keyset cursor (with afterId): the last row's publishedAt",
+            "name": "afterPublishedAt",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Keyset cursor (with afterPublishedAt): the last row's id"
+            },
+            "required": false,
+            "description": "Keyset cursor (with afterPublishedAt): the last row's id",
+            "name": "afterId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "1 to 1000, default 500"
+            },
+            "required": false,
+            "description": "1 to 1000, default 500",
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Main posts with the org that owns them and when their post_published was declared",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadsMeasurablePostList"
                 }
               }
             }

@@ -10,7 +10,7 @@
  *   subject = this row), declared on the caller's run (x-run-id). A reply is part
  *   of its thread and declares nothing. The Threads API is free: no cost.
  */
-import { and, desc, eq, gte, lte, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, isNotNull, lte, sql, type SQL } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
   threadsPublications,
@@ -248,6 +248,36 @@ export async function listPublications(params: {
     .from(threadsPublications)
     .where(and(...filters))
     .orderBy(desc(threadsPublications.publishedAt), desc(threadsPublications.createdAt))
+    .limit(params.limit);
+}
+
+/**
+ * FLEET-WIDE main posts on record whose `post_published` landed on runs-service
+ * (FACTORY-P2-CONTENT-OUTCOMES): what social-service measures (views, engagement)
+ * and declares outcomes on, each consuming that `post_published`. Oldest first,
+ * keyset on (published_at, id) so a reader pages without gaps.
+ */
+export async function listMeasurablePosts(params: {
+  since: Date;
+  after?: { publishedAt: Date; id: string };
+  limit: number;
+}): Promise<ThreadsPublication[]> {
+  const filters: SQL[] = [
+    eq(threadsPublications.status, "published"),
+    eq(threadsPublications.kind, "post"),
+    isNotNull(threadsPublications.outcomeDeclaredAt),
+    gte(threadsPublications.publishedAt, params.since),
+  ];
+  if (params.after) {
+    filters.push(
+      sql`(${threadsPublications.publishedAt}, ${threadsPublications.id}) > (${params.after.publishedAt.toISOString()}::timestamptz, ${params.after.id}::uuid)`,
+    );
+  }
+  return db
+    .select()
+    .from(threadsPublications)
+    .where(and(...filters))
+    .orderBy(asc(threadsPublications.publishedAt), asc(threadsPublications.id))
     .limit(params.limit);
 }
 
