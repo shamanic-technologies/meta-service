@@ -71,6 +71,23 @@ publishable server-side (`POST /orgs/threads/accounts/:id/posts`, text + optiona
   190/102) flips the account to `needs_reconnect` with a plain reason, and a
   publish on it is a 409 `reason: needs_reconnect`, never a 500. The Threads API
   is free: publishing declares no cost.
+- **Every Threads publication is on record, idempotent, and a MAIN post is one
+  `post_published` outcome (THREADS-CAMPAIGN-1028).** `threads_publications`
+  keeps each post/reply (account snapshot, the account's brand, org, user, run,
+  `x-campaign-id`, kind `post|reply`, parent + thread root post, text, permalink,
+  time). `idempotencyKey` (body, unique per org) is claimed by a `publishing` row
+  BEFORE Threads is called: same key = the same publication answered (200,
+  `replayed: true`), a key naming another account/text/parent or still in flight
+  = 409 `idempotency_key_reused` / `publish_in_progress`; a Threads refusal frees
+  the key. A main post declares `post_published` (subject `meta-service` /
+  publication id) on the CALLER's run (`POST /v1/runs/{x-run-id}/outcomes`); a
+  reply declares nothing (one thread = one outcome, billing counts it). A refused
+  declaration never unpublishes: answered `outcome.declared: false`, logged
+  `OUTCOME NOT DECLARED`, retried by the replay. `GET /orgs/threads/publications
+  ?campaignId=&brandId=&since=&until=&limit=` (one of the first two required,
+  default 30 days, newest first) is what a campaign workflow reads each run for
+  spacing, rotation and subjects. No type gate and no queue here: account choice
+  and spacing are the workflow's.
 - **The Threads tests run on a REAL Postgres** (`tests/integration/threads.test.ts`,
   CI `services: postgres`): locally point `META_SERVICE_DATABASE_URL` at a
   scratch database.

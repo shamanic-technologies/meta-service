@@ -73,6 +73,51 @@ export async function completeRun(
   });
 }
 
+export interface ProducedOutcome {
+  outcomeKey: string;
+  subjectService: string;
+  subjectId: string;
+}
+
+/**
+ * Declare what the CALLER's run produced (runs-service `POST /v1/runs/{id}/outcomes`,
+ * org-scoped by `x-org-id`). Idempotent on runs-service's side: a replay answers
+ * `already_recorded`. Retries a transport error, a 429 or a 5xx; throws on the last
+ * failure so the caller can record the miss loudly.
+ */
+export async function declareRunOutcomes(
+  runId: string,
+  orgId: string,
+  produced: ProducedOutcome[],
+  waitsMs: number[] = [1000, 3000],
+): Promise<void> {
+  const url = `${RUNS_SERVICE_URL()}/v1/runs/${encodeURIComponent(runId)}/outcomes`;
+  let last = "";
+  for (let attempt = 0; attempt <= waitsMs.length; attempt++) {
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-API-Key": RUNS_SERVICE_API_KEY(),
+          "x-org-id": orgId,
+        },
+        body: JSON.stringify({ produced }),
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (response.ok) return;
+      last = `${response.status} ${await response.text().catch(() => "")}`;
+      if (response.status < 500 && response.status !== 429) break;
+    } catch (err) {
+      last = err instanceof Error ? err.message : String(err);
+    }
+    if (attempt < waitsMs.length) {
+      await new Promise((r) => setTimeout(r, waitsMs[attempt]));
+    }
+  }
+  throw new Error(`runs-service POST /v1/runs/${runId}/outcomes failed: ${last}`);
+}
+
 // ==================== costs-service ====================
 
 const COSTS_SERVICE_URL = () =>

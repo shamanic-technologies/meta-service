@@ -355,3 +355,66 @@ export const threadsOauthPending = pgTable(
 export type ThreadsAccount = typeof threadsAccounts.$inferSelect;
 export type NewThreadsAccount = typeof threadsAccounts.$inferInsert;
 export type ThreadsOauthPending = typeof threadsOauthPending.$inferSelect;
+
+// ==================== Threads publications ====================
+//
+// Every post and reply this service published on a Threads account, kept so a
+// caller can read what a campaign (or a brand) published, where and when, and so
+// a publish can be idempotent on the caller's own key. The identity columns come
+// from the request headers (x-org-id, x-user-id, x-run-id, x-campaign-id); the
+// brand and the account are the ACCOUNT's, snapshotted, so a disconnected
+// account keeps its history readable. A row is `publishing` while the Threads
+// call is in flight (the idempotency claim) and `published` once it landed.
+
+export const threadsPublications = pgTable(
+  "threads_publications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: text("org_id").notNull(),
+    brandId: text("brand_id").notNull(),
+    accountId: uuid("account_id").notNull(),
+    threadsUserId: text("threads_user_id").notNull(),
+    accountUsername: text("account_username").notNull(),
+    accountType: text("account_type").notNull(),
+    userId: text("user_id").notNull(),
+    runId: text("run_id").notNull(),
+    campaignId: text("campaign_id"),
+    // post | reply
+    kind: text("kind").notNull(),
+    replyToPostId: text("reply_to_post_id"),
+    // The Threads id of the main post this publication belongs to (itself for a post).
+    threadRootPostId: text("thread_root_post_id"),
+    text: text("text").notNull(),
+    // publishing | published
+    status: text("status").notNull().default("publishing"),
+    threadsPostId: text("threads_post_id"),
+    permalink: text("permalink"),
+    idempotencyKey: text("idempotency_key"),
+    // When the `post_published` outcome landed on runs-service (main posts only).
+    outcomeDeclaredAt: timestamp("outcome_declared_at", { withTimezone: true }),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    unique("uq_threads_publications_org_key").on(table.orgId, table.idempotencyKey),
+    index("idx_threads_publications_campaign").on(
+      table.orgId,
+      table.campaignId,
+      table.publishedAt,
+    ),
+    index("idx_threads_publications_brand").on(
+      table.orgId,
+      table.brandId,
+      table.publishedAt,
+    ),
+    index("idx_threads_publications_post").on(table.orgId, table.threadsPostId),
+  ],
+);
+
+export type ThreadsPublication = typeof threadsPublications.$inferSelect;
+export type NewThreadsPublication = typeof threadsPublications.$inferInsert;

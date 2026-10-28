@@ -22,7 +22,7 @@ vi.mock("../../src/lib/key-service.js", async (importOriginal) => {
 });
 
 const { db, sql } = await import("../../src/db/index.js");
-const { threadsAccounts, threadsOauthPending } = await import("../../src/db/schema.js");
+const { threadsAccounts, threadsOauthPending, threadsPublications } = await import("../../src/db/schema.js");
 const { encrypt, decrypt } = await import("../../src/lib/crypto.js");
 const { runTokenRefresh } = await import("../../src/lib/threads-accounts.js");
 const { createTestApp, getAuthHeaders } = await import("../helpers/test-app.js");
@@ -39,6 +39,10 @@ const CODE_TO_USER: Record<string, { id: string; username: string }> = {
 type Handler = (url: URL, init?: RequestInit) => { status?: number; body: unknown };
 let threadsHandler: Handler;
 const calls: Array<{ url: URL; body: URLSearchParams | null }> = [];
+/** runs-service calls (RUNS_SERVICE_URL = http://localhost:9999 in tests/setup.ts). */
+const runsCalls: Array<{ url: URL; headers: Headers; body: any }> = [];
+let runsStatus = 201;
+let threadsDelayMs = 0;
 
 function defaultThreads(): Handler {
   return (url, init) => {
@@ -85,8 +89,13 @@ beforeAll(async () => {
   await migrate(db, { migrationsFolder: "./drizzle" });
   vi.stubGlobal("fetch", async (input: string | URL, init?: RequestInit) => {
     const url = new URL(String(input));
+    if (url.host === "localhost:9999" && url.pathname.startsWith("/v1/runs/")) {
+      runsCalls.push({ url, headers: new Headers(init?.headers), body: JSON.parse(String(init?.body)) });
+      return new Response(JSON.stringify({ recordedCount: 1 }), { status: runsStatus, headers: { "content-type": "application/json" } });
+    }
     if (!url.hostname.endsWith("threads.net")) return realFetch(input, init);
     calls.push({ url, body: init?.body ? new URLSearchParams(String(init.body)) : null });
+    if (threadsDelayMs) await new Promise((r) => setTimeout(r, threadsDelayMs));
     const { status = 200, body } = threadsHandler(url, init);
     return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
   });
@@ -100,8 +109,12 @@ afterAll(async () => {
 beforeEach(async () => {
   await db.delete(threadsAccounts);
   await db.delete(threadsOauthPending);
+  await db.delete(threadsPublications);
   threadsHandler = defaultThreads();
   calls.length = 0;
+  runsCalls.length = 0;
+  runsStatus = 201;
+  threadsDelayMs = 0;
 });
 
 async function connect(code: string, accountType = "pro_ai", headers = getAuthHeaders()) {
@@ -250,11 +263,14 @@ describe("Threads publishing", () => {
 
     const post = await request(app).post(`/orgs/threads/accounts/${id}/posts`).set(getAuthHeaders()).send({ text: "Hello Threads" });
     expect(post.status).toBe(201);
-    expect(post.body).toEqual({
+    expect(post.body).toMatchObject({
       accountId: id,
       postId: "post-root",
       permalink: "https://www.threads.net/@x/post/post-root",
       replyToPostId: null,
+      kind: "post",
+      threadRootPostId: "post-root",
+      replayed: false,
     });
 
     const reply = await request(app)
@@ -315,6 +331,194 @@ describe("Threads publishing", () => {
     const { body } = await connect("code-alice");
     const res = await request(app).post(`/orgs/threads/accounts/${body.account.id}/posts`).set(getAuthHeaders()).send({ text: "x".repeat(501) });
     expect(res.status).toBe(400);
+  });
+});
+
+describe("Threads publications on record", () => {
+  /** Threads hands out a new media id per publish: post-1, post-2, ... */
+  function countingThreads(): Handler {
+    const base = defaultThreads();
+    let n = 0;
+    return (url, init) => {
+      if (/^\/v1\.0\/\d+\/threads_publish$/.test(url.pathname)) {
+        n += 1;
+        return { body: { id: `post-${n}` } };
+      }
+      return base(url, init);
+    };
+  }
+
+  const campaignHeaders = (campaignId: string, runId = "11111111-1111-1111-1111-111111111111") => ({
+    ...getAuthHeaders(),
+    "x-run-id": runId,
+    "x-campaign-id": campaignId,
+    "x-brand-id": BRAND,
+  });
+
+  const publishCalls = () => calls.filter((c) => /\/threads_publish$/.test(c.url.pathname));
+
+  it("same idempotency key twice = one Threads call, same answer", async () => {
+    const { body } = await connect("code-alice");
+    threadsHandler = countingThreads();
+    const send = () =>
+      request(app)
+        .post(`/orgs/threads/accounts/${body.account.id}/posts`)
+        .set(campaignHeaders("camp-A"))
+        .send({ text: "Main post", idempotencyKey: "run-1:main" });
+
+    const first = await send();
+    const second = await send();
+
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(200);
+    expect(second.body.replayed).toBe(true);
+    const { replayed: _a, ...firstRest } = first.body;
+    const { replayed: _b, ...secondRest } = second.body;
+    expect(secondRest).toEqual(firstRest);
+    expect(publishCalls()).toHaveLength(1);
+    expect(await db.select().from(threadsPublications)).toHaveLength(1);
+    // The outcome is declared once: the replay finds it already declared.
+    expect(runsCalls).toHaveLength(1);
+
+    const reused = await request(app)
+      .post(`/orgs/threads/accounts/${body.account.id}/posts`)
+      .set(campaignHeaders("camp-A"))
+      .send({ text: "Another text", idempotencyKey: "run-1:main" });
+    expect(reused.status).toBe(409);
+    expect(reused.body.reason).toBe("idempotency_key_reused");
+    expect(publishCalls()).toHaveLength(1);
+  });
+
+  it("two concurrent calls with one key publish once", async () => {
+    const { body } = await connect("code-alice");
+    threadsHandler = countingThreads();
+    const send = () =>
+      request(app)
+        .post(`/orgs/threads/accounts/${body.account.id}/posts`)
+        .set(campaignHeaders("camp-A"))
+        .send({ text: "Main post", idempotencyKey: "race" });
+    threadsDelayMs = 100; // keep the first publish in flight while the second arrives
+    const results = await Promise.all([send(), send()]);
+    expect(publishCalls()).toHaveLength(1);
+    expect(results.map((r) => r.status).sort()).toEqual([201, 409]);
+    expect(results.find((r) => r.status === 409)!.body.reason).toBe("publish_in_progress");
+  });
+
+  it("a Threads refusal frees the key: the retry publishes", async () => {
+    const { body } = await connect("code-alice");
+    threadsHandler = () => ({ status: 400, body: { error: { message: "Application request limit reached", code: 4 } } });
+    const send = () =>
+      request(app)
+        .post(`/orgs/threads/accounts/${body.account.id}/posts`)
+        .set(campaignHeaders("camp-A"))
+        .send({ text: "Main post", idempotencyKey: "k" });
+    expect((await send()).status).toBe(502);
+    expect(await db.select().from(threadsPublications)).toHaveLength(0);
+    threadsHandler = countingThreads();
+    expect((await send()).status).toBe(201);
+  });
+
+  it("a main post + 2 replies for campaign C: the read lists 3 rows newest first; another campaign's are absent", async () => {
+    const { body } = await connect("code-alice");
+    const accountId = body.account.id;
+    threadsHandler = countingThreads();
+    const post = (headers: Record<string, string>, payload: object) =>
+      request(app).post(`/orgs/threads/accounts/${accountId}/posts`).set(headers).send(payload);
+
+    const main = await post(campaignHeaders("camp-C"), { text: "Main", idempotencyKey: "c:main" });
+    const r1 = await post(campaignHeaders("camp-C"), { text: "Reply 1", replyToPostId: main.body.postId, idempotencyKey: "c:r1" });
+    const r2 = await post(campaignHeaders("camp-C"), { text: "Reply 2", replyToPostId: r1.body.postId, idempotencyKey: "c:r2" });
+    expect([main.status, r1.status, r2.status]).toEqual([201, 201, 201]);
+    expect(r2.body.threadRootPostId).toBe(main.body.postId);
+    await post(campaignHeaders("camp-OTHER"), { text: "Other campaign", idempotencyKey: "o:main" });
+
+    const list = await request(app)
+      .get("/orgs/threads/publications")
+      .query({ campaignId: "camp-C" })
+      .set(getAuthHeaders());
+    expect(list.status).toBe(200);
+    expect(list.body.publications).toHaveLength(3);
+    expect(list.body.publications.map((p: any) => p.text)).toEqual(["Reply 2", "Reply 1", "Main"]);
+    expect(list.body.publications.map((p: any) => p.kind)).toEqual(["reply", "reply", "post"]);
+    expect(list.body.publications[0]).toMatchObject({
+      accountId,
+      accountUsername: "alice_ai",
+      accountType: "pro_ai",
+      brandId: BRAND,
+      campaignId: "camp-C",
+      runId: "11111111-1111-1111-1111-111111111111",
+      replyToPostId: r1.body.postId,
+      threadRootPostId: main.body.postId,
+      postId: r2.body.postId,
+      permalink: `https://www.threads.net/@x/post/${r2.body.postId}`,
+    });
+    expect(list.body.publications[2].replyToPostId).toBeNull();
+
+    const byBrand = await request(app).get("/orgs/threads/publications").query({ brandId: BRAND }).set(getAuthHeaders());
+    expect(byBrand.body.publications).toHaveLength(4);
+
+    const otherOrg = await request(app)
+      .get("/orgs/threads/publications")
+      .query({ campaignId: "camp-C" })
+      .set({ ...getAuthHeaders(), "x-org-id": "another-org" });
+    expect(otherOrg.body.publications).toEqual([]);
+
+    const future = await request(app)
+      .get("/orgs/threads/publications")
+      .query({ campaignId: "camp-C", since: new Date(Date.now() + 60_000).toISOString() })
+      .set(getAuthHeaders());
+    expect(future.body.publications).toEqual([]);
+
+    const noFilter = await request(app).get("/orgs/threads/publications").set(getAuthHeaders());
+    expect(noFilter.status).toBe(400);
+  });
+
+  it("a main post declares exactly one post_published on the caller's run; a reply none", async () => {
+    const { body } = await connect("code-alice");
+    threadsHandler = countingThreads();
+    const runId = "22222222-2222-2222-2222-222222222222";
+    const main = await request(app)
+      .post(`/orgs/threads/accounts/${body.account.id}/posts`)
+      .set(campaignHeaders("camp-C", runId))
+      .send({ text: "Main" });
+    expect(runsCalls).toHaveLength(1);
+    expect(runsCalls[0].url.pathname).toBe(`/v1/runs/${runId}/outcomes`);
+    expect(runsCalls[0].headers.get("x-org-id")).toBe("test-org-id");
+    expect(runsCalls[0].headers.get("x-api-key")).toBe("test-runs-key");
+    expect(runsCalls[0].body).toEqual({
+      produced: [{ outcomeKey: "post_published", subjectService: "meta-service", subjectId: main.body.publicationId }],
+    });
+    expect(main.body.outcome).toEqual({ outcomeKey: "post_published", declared: true, error: null });
+
+    const reply = await request(app)
+      .post(`/orgs/threads/accounts/${body.account.id}/posts`)
+      .set(campaignHeaders("camp-C", runId))
+      .send({ text: "Reply", replyToPostId: main.body.postId });
+    expect(reply.status).toBe(201);
+    expect(reply.body.outcome).toBeNull();
+    expect(runsCalls).toHaveLength(1);
+  });
+
+  it("an outcome runs-service refuses stays published, says so, and is declared by the replay", async () => {
+    const { body } = await connect("code-alice");
+    threadsHandler = countingThreads();
+    runsStatus = 422;
+    const send = () =>
+      request(app)
+        .post(`/orgs/threads/accounts/${body.account.id}/posts`)
+        .set(campaignHeaders("camp-C"))
+        .send({ text: "Main", idempotencyKey: "declare-later" });
+    const first = await send();
+    expect(first.status).toBe(201);
+    expect(first.body.outcome.declared).toBe(false);
+    expect(first.body.outcome.error).toContain("422");
+
+    runsStatus = 201;
+    const replay = await send();
+    expect(replay.status).toBe(200);
+    expect(replay.body.outcome.declared).toBe(true);
+    expect(publishCalls()).toHaveLength(1);
+    expect(runsCalls).toHaveLength(2);
   });
 });
 

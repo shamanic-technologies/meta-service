@@ -484,6 +484,11 @@ const IdentityHeadersSchema = z.object({
   "x-run-id": z.string().openapi({ description: "Caller's run ID" }),
 });
 
+const ThreadsPublishHeadersSchema = IdentityHeadersSchema.extend({
+  "x-campaign-id": z.string().optional().openapi({ description: "Campaign the publication is made for (kept on the record, read back by campaign)" }),
+  "x-brand-id": z.string().optional().openapi({ description: "Caller's brand (the record keeps the ACCOUNT's brand)" }),
+});
+
 export const OptimizationGoalSchema = z
   .enum([
     "REACH",
@@ -941,8 +946,16 @@ export const ThreadsPublishSchema = z
     replyToPostId: z.string().min(1).optional().openapi({
       description: "Publish as a reply under this Threads post id (e.g. the postId a previous call returned)",
     }),
+    idempotencyKey: z.string().min(1).max(512).optional().openapi({
+      description:
+        "Caller's own key, unique per org. The same key again answers the publication it already made (200, `replayed: true`) and never calls Threads twice. The same key with another account, text or parent post is a 409 `idempotency_key_reused`.",
+    }),
   })
   .openapi("ThreadsPublish");
+
+const PublicationKindSchema = z.enum(["post", "reply"]).openapi({
+  description: "`post` = a main post (one `post_published` outcome); `reply` = a reply under a post (part of its thread, no outcome)",
+});
 
 const ThreadsPublishResponseSchema = z
   .object({
@@ -950,8 +963,54 @@ const ThreadsPublishResponseSchema = z
     postId: z.string().openapi({ description: "Threads media id of the published post" }),
     permalink: z.string().nullable(),
     replyToPostId: z.string().nullable(),
+    publicationId: z.string().uuid().openapi({ description: "This service's record of the publication (the outcome's subject)" }),
+    kind: PublicationKindSchema,
+    threadRootPostId: z.string().openapi({ description: "Threads id of the main post of this thread (itself for a post)" }),
+    publishedAt: z.string(),
+    replayed: z.boolean().openapi({ description: "true when the idempotency key had already published this: nothing was published again" }),
+    outcome: z
+      .object({
+        outcomeKey: z.literal("post_published"),
+        declared: z.boolean().openapi({ description: "false = runs-service refused or was unreachable; retried by the next call with the same idempotency key" }),
+        error: z.string().nullable(),
+      })
+      .nullable()
+      .openapi({ description: "The `post_published` outcome declared on the caller's run (x-run-id), main posts only; null for a reply" }),
   })
   .openapi("ThreadsPublishResponse");
+
+export const ThreadsPublicationsQuerySchema = z
+  .object({
+    campaignId: z.string().min(1).optional().openapi({ description: "Publications made under this campaign (x-campaign-id at publish time)" }),
+    brandId: z.string().min(1).optional().openapi({ description: "Publications on this brand's accounts" }),
+    since: z.coerce.date().optional().openapi({ description: "ISO date-time, inclusive. Default: 30 days ago" }),
+    until: z.coerce.date().optional().openapi({ description: "ISO date-time, inclusive. Default: now" }),
+    limit: z.coerce.number().int().min(1).max(1000).default(200),
+  })
+  .refine((q) => q.campaignId || q.brandId, {
+    message: "campaignId or brandId is required",
+    path: ["campaignId"],
+  });
+
+const ThreadsPublicationSchema = z
+  .object({
+    id: z.string().uuid(),
+    accountId: z.string().uuid(),
+    accountUsername: z.string(),
+    accountType: AccountTypeSchema,
+    brandId: z.string(),
+    campaignId: z.string().nullable(),
+    runId: z.string(),
+    userId: z.string(),
+    kind: PublicationKindSchema,
+    replyToPostId: z.string().nullable(),
+    threadRootPostId: z.string().nullable(),
+    postId: z.string(),
+    permalink: z.string().nullable(),
+    text: z.string(),
+    publishedAt: z.string(),
+  })
+  .openapi("ThreadsPublication");
 
 const threadsErrors = {
   400: {
@@ -1071,10 +1130,12 @@ registry.registerPath({
 registry.registerPath({
   method: "post",
   path: "/orgs/threads/accounts/{id}/posts",
-  summary: "Publish a text post, or a reply under a post, on a connected Threads account",
+  summary: "Publish a text post, or a reply under a post, on a connected Threads account (kept on record, idempotent on the caller's key)",
+  description:
+    "Every publication is kept (account, brand, org, user, run, campaign, kind, parent post, text, permalink, time). A main post declares ONE `post_published` outcome on the caller's run (x-run-id), subject = the publication; a reply declares none. The Threads API is free: no cost.",
   security: [{ serviceKeyAuth: [] }],
   request: {
-    headers: IdentityHeadersSchema,
+    headers: ThreadsPublishHeadersSchema,
     params: z.object({ id: z.string().uuid() }),
     body: { content: { "application/json": { schema: ThreadsPublishSchema } } },
   },
@@ -1083,13 +1144,45 @@ registry.registerPath({
       description: "Published",
       content: { "application/json": { schema: ThreadsPublishResponseSchema } },
     },
+    200: {
+      description: "Already published with this idempotency key: the same publication, nothing published again",
+      content: { "application/json": { schema: ThreadsPublishResponseSchema } },
+    },
     ...notFound,
     409: {
       description:
-        "The account needs to be reconnected (Threads no longer accepts its login). Body carries `reason: needs_reconnect` and `accountId`.",
+        "`reason: needs_reconnect` (+ `accountId`): Threads no longer accepts the account's login. `reason: idempotency_key_reused` / `publish_in_progress` (+ `publicationId`): the key names another publication, or its publish is still in flight.",
       content: { "application/json": { schema: ErrorResponseSchema } },
     },
     ...threadsErrors,
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/orgs/threads/publications",
+  summary: "List the Threads publications of one campaign and/or one brand over a time window, newest first",
+  security: [{ serviceKeyAuth: [] }],
+  request: {
+    headers: IdentityHeadersSchema,
+    query: z.object({
+      campaignId: z.string().optional().openapi({ description: "At least one of campaignId, brandId" }),
+      brandId: z.string().optional(),
+      since: z.string().optional().openapi({ description: "ISO date-time, inclusive. Default: 30 days ago" }),
+      until: z.string().optional().openapi({ description: "ISO date-time, inclusive. Default: now" }),
+      limit: z.string().optional().openapi({ description: "1 to 1000, default 200" }),
+    }),
+  },
+  responses: {
+    200: {
+      description: "Publications (posts and replies) of the org matching the filters, newest first",
+      content: {
+        "application/json": {
+          schema: z.object({ publications: z.array(ThreadsPublicationSchema) }).openapi("ThreadsPublicationList"),
+        },
+      },
+    },
+    400: threadsErrors[400],
   },
 });
 

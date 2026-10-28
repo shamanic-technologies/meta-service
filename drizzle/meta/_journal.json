@@ -15,6 +15,13 @@
       "when": 1793192127614,
       "tag": "0001_threads_accounts",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793211060244,
+      "tag": "0002_threads_publications",
+      "breakpoints": true
     }
   ]
 }

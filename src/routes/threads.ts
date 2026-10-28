@@ -10,13 +10,19 @@ import {
   ThreadsConnectCallbackSchema,
   ThreadsConnectStartSchema,
   ThreadsPublishSchema,
+  ThreadsPublicationsQuerySchema,
 } from "../schemas.js";
+import {
+  DEFAULT_WINDOW_DAYS,
+  listPublications,
+  publishAndRecord,
+  serialisePublication,
+} from "../lib/threads-publications.js";
 import {
   completeConnect,
   deleteAccount,
   findAccount,
   listAccounts,
-  publishPost,
   serialiseAccount,
   setAccountType,
   startConnect,
@@ -127,13 +133,49 @@ router.post("/orgs/threads/accounts/:id/posts", async (req, res, next) => {
       notFound(res);
       return;
     }
-    const post = await publishPost({ account, ...parsed.data });
-    res.status(201).json({
-      accountId: account.id,
-      postId: post.postId,
-      permalink: post.permalink,
-      replyToPostId: parsed.data.replyToPostId ?? null,
+    const header = req.headers["x-campaign-id"];
+    const campaignId = typeof header === "string" && header ? header : null;
+    const { publication, replayed, outcome } = await publishAndRecord({
+      account,
+      identity: {
+        orgId: res.locals.orgId,
+        userId: res.locals.userId,
+        runId: res.locals.runId,
+        campaignId,
+      },
+      ...parsed.data,
     });
+    res.status(replayed ? 200 : 201).json({
+      accountId: account.id,
+      postId: publication.threadsPostId,
+      permalink: publication.permalink,
+      replyToPostId: publication.replyToPostId,
+      publicationId: publication.id,
+      kind: publication.kind,
+      threadRootPostId: publication.threadRootPostId,
+      publishedAt: publication.publishedAt!.toISOString(),
+      replayed,
+      outcome,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get("/orgs/threads/publications", async (req, res, next) => {
+  const parsed = ThreadsPublicationsQuerySchema.safeParse(req.query);
+  if (!parsed.success) return invalid(res, parsed.error.flatten());
+  const { campaignId, brandId, since, until, limit } = parsed.data;
+  try {
+    const rows = await listPublications({
+      orgId: res.locals.orgId,
+      campaignId,
+      brandId,
+      since: since ?? new Date(Date.now() - DEFAULT_WINDOW_DAYS * 86_400_000),
+      until,
+      limit,
+    });
+    res.json({ publications: rows.map(serialisePublication) });
   } catch (err) {
     next(err);
   }
