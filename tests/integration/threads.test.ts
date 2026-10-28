@@ -561,6 +561,105 @@ describe("Measurable posts (social-service post metrics)", () => {
   });
 });
 
+describe("Post insights (the Threads adapter of social-service's post metrics)", () => {
+  async function publishedMain(scopes?: string[]) {
+    const { body } = await connect("code-alice");
+    if (scopes) await db.update(threadsAccounts).set({ scopes }).where(eq(threadsAccounts.id, body.account.id));
+    const main = await request(app)
+      .post(`/orgs/threads/accounts/${body.account.id}/posts`)
+      .set({ ...getAuthHeaders(), "x-run-id": "44444444-4444-4444-4444-444444444444", "x-brand-id": BRAND })
+      .send({ text: "Main" });
+    return { accountId: body.account.id as string, publicationId: main.body.publicationId as string, postId: main.body.postId as string };
+  }
+  const key = { "x-api-key": "test-service-key" };
+  const insightCalls = () => calls.filter((c) => c.url.pathname.endsWith("/insights"));
+
+  it("reads every metric on the publishing account; a metric Threads omits is null", async () => {
+    const p = await publishedMain(["threads_basic", "threads_content_publish", "threads_manage_replies", "threads_manage_insights"]);
+    const base = defaultThreads();
+    threadsHandler = (url, init) =>
+      url.pathname === `/v1.0/${p.postId}/insights`
+        ? {
+            body: {
+              data: [
+                { name: "views", period: "lifetime", values: [{ value: 37 }] },
+                { name: "likes", period: "lifetime", values: [{ value: 2 }] },
+                { name: "replies", period: "lifetime", values: [{ value: 1 }] },
+                { name: "reposts", period: "lifetime", values: [{ value: 0 }] },
+                { name: "quotes", period: "lifetime", total_value: { value: 0 } },
+              ],
+            },
+          }
+        : base(url, init);
+    const res = await request(app).get(`/internal/threads/publications/${p.publicationId}/insights`).set(key);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ publicationId: p.publicationId, postId: p.postId });
+    expect(res.body.metrics).toEqual({ views: 37, likes: 2, replies: 1, reposts: 0, quotes: 0, shares: null });
+    expect(insightCalls()[0].url.searchParams.get("metric")).toBe("views,likes,replies,reposts,quotes,shares");
+    expect(insightCalls()[0].url.searchParams.get("access_token")).toBe("long-1001");
+  });
+
+  it("an account connected without the insights scope: 409 insights_scope_missing, no Threads call", async () => {
+    const p = await publishedMain();
+    const res = await request(app).get(`/internal/threads/publications/${p.publicationId}/insights`).set(key);
+    expect(res.status).toBe(409);
+    expect(res.body.reason).toBe("insights_scope_missing");
+    expect(insightCalls()).toHaveLength(0);
+  });
+
+  it("Threads code 10 = 409 insights_permission_missing; code 190 = needs_reconnect and the account flips", async () => {
+    const p = await publishedMain(["threads_basic", "threads_manage_insights"]);
+    const base = defaultThreads();
+    let code = 10;
+    threadsHandler = (url, init) =>
+      url.pathname.endsWith("/insights")
+        ? { status: 403, body: { error: { message: "Application does not have permission for this action", code } } }
+        : base(url, init);
+    const denied = await request(app).get(`/internal/threads/publications/${p.publicationId}/insights`).set(key);
+    expect(denied.status).toBe(409);
+    expect(denied.body.reason).toBe("insights_permission_missing");
+
+    code = 190;
+    const dead = await request(app).get(`/internal/threads/publications/${p.publicationId}/insights`).set(key);
+    expect(dead.status).toBe(409);
+    expect(dead.body.reason).toBe("needs_reconnect");
+    const [row] = await db.select().from(threadsAccounts).where(eq(threadsAccounts.id, p.accountId));
+    expect(row.status).toBe("needs_reconnect");
+  });
+
+  it("a reply has no insights of its own (409 not_measurable); an unknown id is 404", async () => {
+    const p = await publishedMain(["threads_manage_insights"]);
+    const reply = await request(app)
+      .post(`/orgs/threads/accounts/${p.accountId}/posts`)
+      .set({ ...getAuthHeaders(), "x-run-id": "44444444-4444-4444-4444-444444444444", "x-brand-id": BRAND })
+      .send({ text: "Reply", replyToPostId: p.postId });
+    const res = await request(app).get(`/internal/threads/publications/${reply.body.publicationId}/insights`).set(key);
+    expect(res.status).toBe(409);
+    expect(res.body.reason).toBe("not_measurable");
+    const missing = await request(app).get("/internal/threads/publications/55555555-5555-5555-5555-555555555555/insights").set(key);
+    expect(missing.status).toBe(404);
+  });
+
+  it("THREADS_INSIGHTS_SCOPE=on asks for threads_manage_insights and stores it on the account", async () => {
+    process.env.THREADS_INSIGHTS_SCOPE = "on";
+    try {
+      const start = await request(app)
+        .post("/orgs/threads/auth/start")
+        .set(getAuthHeaders())
+        .send({ brandId: BRAND, accountType: "pro_ai", redirectUri: "https://dashboard.distribute.you/threads/callback" });
+      expect(new URL(start.body.authorizationUrl).searchParams.get("scope")).toBe(
+        "threads_basic,threads_content_publish,threads_manage_replies,threads_manage_insights",
+      );
+      const state = new URL(start.body.authorizationUrl).searchParams.get("state")!;
+      const done = await request(app).post("/orgs/threads/auth/callback").set(getAuthHeaders()).send({ code: "code-alice", state });
+      const [row] = await db.select().from(threadsAccounts).where(eq(threadsAccounts.id, done.body.account.id));
+      expect(row.scopes).toContain("threads_manage_insights");
+    } finally {
+      delete process.env.THREADS_INSIGHTS_SCOPE;
+    }
+  });
+});
+
 describe("Threads token refresh", () => {
   async function seed(overrides: Partial<typeof threadsAccounts.$inferInsert>) {
     const [row] = await db

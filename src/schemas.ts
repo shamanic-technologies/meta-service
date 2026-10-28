@@ -1233,6 +1233,49 @@ registry.registerPath({
 });
 
 registry.registerPath({
+  method: "get",
+  path: "/internal/threads/publications/{id}/insights",
+  summary:
+    "Live lifetime insights of one Threads MAIN post (views, likes, replies, reposts, quotes, shares), read on the account that published it. Free, stores nothing: social-service keeps the series and declares post_viewed / post_engaged (FACTORY-P2-CONTENT-OUTCOMES).",
+  security: [{ serviceKeyAuth: [] }],
+  request: { params: z.object({ id: z.string().uuid().openapi({ description: "Publication id (GET /internal/threads/measurable-posts)" }) }) },
+  responses: {
+    200: {
+      description: "The post's insights; a metric Threads did not return is null, never 0",
+      content: {
+        "application/json": {
+          schema: z
+            .object({
+              publicationId: z.string().uuid(),
+              postId: z.string(),
+              permalink: z.string().nullable(),
+              observedAt: z.string(),
+              metrics: z.object({
+                views: z.number().nullable(),
+                likes: z.number().nullable(),
+                replies: z.number().nullable(),
+                reposts: z.number().nullable(),
+                quotes: z.number().nullable(),
+                shares: z.number().nullable(),
+              }),
+              raw: z.unknown().openapi({ description: "Threads' answer verbatim (bronze for the caller)" }),
+            })
+            .openapi("ThreadsPostInsights"),
+        },
+      },
+    },
+    400: { description: "Invalid publication id", content: { "application/json": { schema: ErrorResponseSchema } } },
+    404: { description: "No such publication", content: { "application/json": { schema: ErrorResponseSchema } } },
+    409: {
+      description:
+        "Not readable now, `reason`: `needs_reconnect` (Threads no longer accepts the login), `insights_scope_missing` (connected without threads_manage_insights), `insights_permission_missing` (our Meta app lacks the permission: Threads code 10), `not_measurable` (a reply, unpublished, or the account is gone)",
+      content: { "application/json": { schema: ErrorResponseSchema } },
+    },
+    502: { description: "Threads refused the read (its code and message)", content: { "application/json": { schema: ErrorResponseSchema } } },
+  },
+});
+
+registry.registerPath({
   method: "post",
   path: "/internal/threads/token-refresh",
   summary:

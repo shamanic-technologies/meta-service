@@ -13,12 +13,14 @@
 import { and, asc, desc, eq, gte, isNotNull, lte, sql, type SQL } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
+  threadsAccounts,
   threadsPublications,
   type ThreadsAccount,
   type ThreadsPublication,
 } from "../db/schema.js";
 import { declareRunOutcomes } from "./services.js";
-import { publishPost } from "./threads-accounts.js";
+import { publishPost, readPostInsights } from "./threads-accounts.js";
+import type { PostInsights } from "./threads-client.js";
 
 export const POST_PUBLISHED = "post_published";
 export const SUBJECT_SERVICE = "meta-service";
@@ -279,6 +281,39 @@ export async function listMeasurablePosts(params: {
     .where(and(...filters))
     .orderBy(asc(threadsPublications.publishedAt), asc(threadsPublications.id))
     .limit(params.limit);
+}
+
+export class PublicationNotMeasurableError extends Error {
+  constructor(readonly publicationId: string, message: string) {
+    super(message);
+    this.name = "PublicationNotMeasurableError";
+  }
+}
+
+/**
+ * The live insights of one MAIN post (FACTORY-P2-CONTENT-OUTCOMES), read on the
+ * account that published it. Null = no such publication. Stores nothing:
+ * social-service keeps the series (bronze call + silver snapshot) and declares the
+ * outcomes.
+ */
+export async function publicationInsights(id: string): Promise<{
+  publication: ThreadsPublication;
+  observedAt: string;
+  insights: PostInsights;
+  raw: unknown;
+} | null> {
+  const [publication] = await db.select().from(threadsPublications).where(eq(threadsPublications.id, id)).limit(1);
+  if (!publication) return null;
+  if (publication.kind !== "post" || publication.status !== "published" || !publication.threadsPostId) {
+    throw new PublicationNotMeasurableError(id, "Only a published MAIN post has insights of its own");
+  }
+  const [account] = await db.select().from(threadsAccounts).where(eq(threadsAccounts.id, publication.accountId)).limit(1);
+  if (!account) {
+    throw new PublicationNotMeasurableError(id, `The Threads account that published it (@${publication.accountUsername}) is no longer connected`);
+  }
+  const observedAt = new Date().toISOString();
+  const { insights, raw } = await readPostInsights({ account, postId: publication.threadsPostId });
+  return { publication, observedAt, insights, raw };
 }
 
 export function serialisePublication(row: ThreadsPublication) {

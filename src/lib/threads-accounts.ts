@@ -21,10 +21,13 @@ import {
   buildAuthorizeUrl,
   exchangeCode,
   exchangeForLongLivedToken,
+  getPostInsights,
   getProfile,
   publishText,
+  THREADS_INSIGHTS_SCOPE,
+  type PostInsights,
   refreshLongLivedToken,
-  THREADS_SCOPES,
+  requestedScopes,
   ThreadsApiError,
   type PublishedPost,
   type ThreadsAppCredentials,
@@ -208,7 +211,7 @@ export async function completeConnect(params: {
       accessToken: encryptedToken,
       tokenIssuedAt: now,
       tokenExpiresAt,
-      scopes: [...THREADS_SCOPES],
+      scopes: requestedScopes(),
       status: "connected",
       statusReason: null,
     })
@@ -227,7 +230,7 @@ export async function completeConnect(params: {
         accessToken: encryptedToken,
         tokenIssuedAt: now,
         tokenExpiresAt,
-        scopes: [...THREADS_SCOPES],
+        scopes: requestedScopes(),
         status: "connected",
         statusReason: null,
         updatedAt: now,
@@ -318,6 +321,63 @@ export async function publishPost(params: {
       const reason = deadTokenReason(err);
       await markNeedsReconnect(account.id, reason);
       throw new ThreadsReconnectRequiredError(account.id, reason);
+    }
+    throw err;
+  }
+}
+
+// ==================== Insights ====================
+
+/**
+ * Why a post's insights cannot be read, in words a caller acts on:
+ * - `insights_scope_missing`: the account was connected without
+ *   `threads_manage_insights` (THREADS_INSIGHTS_SCOPE was off): reconnect it once the
+ *   scope is asked for. No Threads call is made.
+ * - `insights_permission_missing`: Threads answered code 10 "Application does not have
+ *   permission for this action": our Meta app's Threads use case lacks the permission.
+ */
+export class ThreadsInsightsUnavailableError extends Error {
+  constructor(
+    readonly accountId: string,
+    readonly reason: "insights_scope_missing" | "insights_permission_missing",
+    message: string,
+  ) {
+    super(message);
+    this.name = "ThreadsInsightsUnavailableError";
+  }
+}
+
+/** One post's lifetime insights on the account that published it, read live (free). */
+export async function readPostInsights(params: {
+  account: ThreadsAccount;
+  postId: string;
+}): Promise<{ insights: PostInsights; raw: unknown }> {
+  const { account } = params;
+  const { health, healthReason } = healthOf(account);
+  if (health === "needs_reconnect") {
+    throw new ThreadsReconnectRequiredError(account.id, healthReason!);
+  }
+  if (!account.scopes.includes(THREADS_INSIGHTS_SCOPE)) {
+    throw new ThreadsInsightsUnavailableError(
+      account.id,
+      "insights_scope_missing",
+      `Threads account @${account.username} was connected without ${THREADS_INSIGHTS_SCOPE}: reconnect it to read its posts' views and engagement.`,
+    );
+  }
+  try {
+    return await getPostInsights(decrypt(account.accessToken), params.postId);
+  } catch (err) {
+    if (err instanceof ThreadsApiError && err.tokenInvalid) {
+      const reason = deadTokenReason(err);
+      await markNeedsReconnect(account.id, reason);
+      throw new ThreadsReconnectRequiredError(account.id, reason);
+    }
+    if (err instanceof ThreadsApiError && err.threadsError?.code === 10) {
+      throw new ThreadsInsightsUnavailableError(
+        account.id,
+        "insights_permission_missing",
+        `Threads refused the insights read: our Meta app lacks ${THREADS_INSIGHTS_SCOPE} (${err.threadsError?.message ?? "code 10"}).`,
+      );
     }
     throw err;
   }
