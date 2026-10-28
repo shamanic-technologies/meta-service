@@ -19,6 +19,23 @@ export const THREADS_SCOPES = [
   "threads_manage_replies",
 ] as const;
 
+/** Reading a post's views / likes / replies / reposts / quotes / shares. */
+export const THREADS_INSIGHTS_SCOPE = "threads_manage_insights";
+
+/**
+ * The scopes a new connection asks for. `threads_manage_insights` is asked only
+ * once `THREADS_INSIGHTS_SCOPE=on`: Threads refuses the whole login when the app
+ * does not hold a scope it is asked for, so turning it on before the permission is
+ * added to our Meta app's Threads use case would break every new connection.
+ */
+export function requestedScopes(env: NodeJS.ProcessEnv = process.env): string[] {
+  const flag = (env.THREADS_INSIGHTS_SCOPE ?? "off").trim();
+  if (flag !== "on" && flag !== "off") {
+    throw new Error(`THREADS_INSIGHTS_SCOPE must be "on" or "off", got ${JSON.stringify(flag)}`);
+  }
+  return flag === "on" ? [...THREADS_SCOPES, THREADS_INSIGHTS_SCOPE] : [...THREADS_SCOPES];
+}
+
 export interface ThreadsAppCredentials {
   appId: string;
   appSecret: string;
@@ -111,7 +128,7 @@ export function buildAuthorizeUrl(params: {
   const url = new URL(THREADS_AUTHORIZE_URL);
   url.searchParams.set("client_id", params.appId);
   url.searchParams.set("redirect_uri", params.redirectUri);
-  url.searchParams.set("scope", THREADS_SCOPES.join(","));
+  url.searchParams.set("scope", requestedScopes().join(","));
   url.searchParams.set("response_type", "code");
   url.searchParams.set("state", params.state);
   return url.toString();
@@ -290,4 +307,46 @@ export async function publishText(params: {
   }
 
   return { postId: String(published.id), permalink };
+}
+
+export interface PostInsights {
+  views: number | null;
+  likes: number | null;
+  replies: number | null;
+  reposts: number | null;
+  quotes: number | null;
+  shares: number | null;
+}
+
+export const INSIGHT_METRICS = ["views", "likes", "replies", "reposts", "quotes", "shares"] as const;
+
+/**
+ * PURE: Threads' media insights body -> one number per metric. Threads answers
+ * `{data: [{name, values: [{value}]}]}` (lifetime metrics) and, for some metrics,
+ * `total_value: {value}`; a metric it does not return reads null, never 0.
+ */
+export function parseInsights(body: unknown): PostInsights {
+  const out: PostInsights = { views: null, likes: null, replies: null, reposts: null, quotes: null, shares: null };
+  const data = body && typeof body === "object" ? (body as { data?: unknown }).data : null;
+  if (!Array.isArray(data)) return out;
+  for (const row of data) {
+    if (!row || typeof row !== "object") continue;
+    const name = (row as { name?: unknown }).name;
+    if (typeof name !== "string" || !(INSIGHT_METRICS as readonly string[]).includes(name)) continue;
+    const values = (row as { values?: unknown }).values;
+    const total = (row as { total_value?: { value?: unknown } }).total_value?.value;
+    const raw = Array.isArray(values) && values.length > 0 ? (values[values.length - 1] as { value?: unknown })?.value : total;
+    const n = typeof raw === "number" ? raw : typeof raw === "string" && raw.trim() !== "" ? Number(raw) : NaN;
+    if (Number.isFinite(n) && n >= 0) out[name as keyof PostInsights] = n;
+  }
+  return out;
+}
+
+/** One post's lifetime insights, read live. Free (the Threads API bills nothing). */
+export async function getPostInsights(token: string, postId: string): Promise<{ insights: PostInsights; raw: unknown }> {
+  const url = new URL(`${THREADS_API}/${postId}/insights`);
+  url.searchParams.set("metric", INSIGHT_METRICS.join(","));
+  url.searchParams.set("access_token", token);
+  const raw = await threadsFetch<unknown>("the post insights read", url.toString());
+  return { insights: parseInsights(raw), raw };
 }

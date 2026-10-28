@@ -89,15 +89,18 @@ publishable server-side (`POST /orgs/threads/accounts/:id/posts`, text + optiona
   spacing, rotation and subjects. No type gate and no queue here: account choice
   and spacing are the workflow's.
 - **What a post led to is measured in social-service, not here (FACTORY-P2-CONTENT-OUTCOMES).**
-  `GET /internal/threads/measurable-posts` (service key, fleet-wide, oldest first, keyset
-  `afterPublishedAt`+`afterId`) lists every MAIN post whose `post_published` landed, with its
-  org and run: social-service reads it, measures each post and declares `post_viewed` /
-  `post_engaged` consuming that `post_published`. The Threads insights API needs the
-  `threads_manage_insights` scope, which our tokens do not carry (403 code 10 on
-  `/{media-id}/insights`, probed 2026-10-29): do not add it to `THREADS_SCOPES` before the
-  Meta app holds that permission, or every new connection fails. A post's link that should
-  credit visits and signups to it carries `dy_post=meta-service:<publication id>`
-  (lead-service reads it off the visit's entry URL).
+  Two service-key reads are its Threads adapter: `GET /internal/threads/measurable-posts`
+  (fleet-wide MAIN posts whose `post_published` landed, with org + publishing run, oldest
+  first, keyset `afterPublishedAt`+`afterId`) and `GET /internal/threads/publications/:id/insights`
+  (live lifetime views, likes, replies, reposts, quotes, shares; free; stores nothing; a metric
+  Threads omits is null). social-service keeps the series and declares `post_viewed` /
+  `post_engaged`. Insights need `threads_manage_insights`: asked at connect only with
+  `THREADS_INSIGHTS_SCOPE=on` (Threads refuses the whole login when our Meta app lacks a scope
+  it is asked for, so turn it on only after the permission is added to the app's Threads use
+  case, then reconnect). 409 reasons: `insights_scope_missing` (no Threads call),
+  `insights_permission_missing` (Threads code 10, probed 2026-10-29 on our account),
+  `needs_reconnect`, `not_measurable`. A post's link that credits visits and signups to it
+  carries `dy_post=meta-service:<publication id>` (lead-service reads it off the visit's entry URL).
 - **The Threads tests run on a REAL Postgres** (`tests/integration/threads.test.ts`,
   CI `services: postgres`): locally point `META_SERVICE_DATABASE_URL` at a
   scratch database.

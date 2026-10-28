@@ -12,7 +12,7 @@ import { Router } from "express";
 import { runReviewSync } from "../services/review-sync.js";
 import { runSpendIngest } from "../services/spend-ingest.js";
 import { runTokenRefresh } from "../lib/threads-accounts.js";
-import { listMeasurablePosts, serialisePublication } from "../lib/threads-publications.js";
+import { listMeasurablePosts, PublicationNotMeasurableError, publicationInsights, serialisePublication } from "../lib/threads-publications.js";
 import { MeasurablePostsQuerySchema } from "../schemas.js";
 
 const router = Router();
@@ -73,6 +73,40 @@ router.get("/internal/threads/measurable-posts", async (req, res, next) => {
       })),
     });
   } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * The live insights of one main post, on the account that published it
+ * (FACTORY-P2-CONTENT-OUTCOMES, the Threads adapter of social-service's post
+ * metrics). Free; nothing stored here. 409 reasons: needs_reconnect,
+ * insights_scope_missing, insights_permission_missing, not_measurable.
+ */
+router.get("/internal/threads/publications/:id/insights", async (req, res, next) => {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(req.params.id)) {
+    res.status(400).json({ error: "Invalid publication id" });
+    return;
+  }
+  try {
+    const read = await publicationInsights(req.params.id);
+    if (!read) {
+      res.status(404).json({ error: "Publication not found" });
+      return;
+    }
+    res.json({
+      publicationId: read.publication.id,
+      postId: read.publication.threadsPostId,
+      permalink: read.publication.permalink,
+      observedAt: read.observedAt,
+      metrics: read.insights,
+      raw: read.raw,
+    });
+  } catch (err) {
+    if (err instanceof PublicationNotMeasurableError) {
+      res.status(409).json({ error: err.message, reason: "not_measurable" });
+      return;
+    }
     next(err);
   }
 });

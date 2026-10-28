@@ -1334,6 +1334,73 @@
         "required": [
           "posts"
         ]
+      },
+      "ThreadsPostInsights": {
+        "type": "object",
+        "properties": {
+          "publicationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "postId": {
+            "type": "string"
+          },
+          "permalink": {
+            "type": "string",
+            "nullable": true
+          },
+          "observedAt": {
+            "type": "string"
+          },
+          "metrics": {
+            "type": "object",
+            "properties": {
+              "views": {
+                "type": "number",
+                "nullable": true
+              },
+              "likes": {
+                "type": "number",
+                "nullable": true
+              },
+              "replies": {
+                "type": "number",
+                "nullable": true
+              },
+              "reposts": {
+                "type": "number",
+                "nullable": true
+              },
+              "quotes": {
+                "type": "number",
+                "nullable": true
+              },
+              "shares": {
+                "type": "number",
+                "nullable": true
+              }
+            },
+            "required": [
+              "views",
+              "likes",
+              "replies",
+              "reposts",
+              "quotes",
+              "shares"
+            ]
+          },
+          "raw": {
+            "nullable": true,
+            "description": "Threads' answer verbatim (bronze for the caller)"
+          }
+        },
+        "required": [
+          "publicationId",
+          "postId",
+          "permalink",
+          "observedAt",
+          "metrics"
+        ]
       }
     },
     "parameters": {}
@@ -3416,6 +3483,81 @@
           },
           "400": {
             "description": "The request cannot be satisfied as written (names the field or the reason)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/threads/publications/{id}/insights": {
+      "get": {
+        "summary": "Live lifetime insights of one Threads MAIN post (views, likes, replies, reposts, quotes, shares), read on the account that published it. Free, stores nothing: social-service keeps the series and declares post_viewed / post_engaged (FACTORY-P2-CONTENT-OUTCOMES).",
+        "security": [
+          {
+            "serviceKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Publication id (GET /internal/threads/measurable-posts)"
+            },
+            "required": true,
+            "description": "Publication id (GET /internal/threads/measurable-posts)",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The post's insights; a metric Threads did not return is null, never 0",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadsPostInsights"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid publication id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such publication",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not readable now, `reason`: `needs_reconnect` (Threads no longer accepts the login), `insights_scope_missing` (connected without threads_manage_insights), `insights_permission_missing` (our Meta app lacks the permission: Threads code 10), `not_measurable` (a reply, unpublished, or the account is gone)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Threads refused the read (its code and message)",
             "content": {
               "application/json": {
                 "schema": {

@@ -2,6 +2,7 @@ import type { NextFunction, Request, Response } from "express";
 import { ThreadsApiError } from "../lib/threads-client.js";
 import { ThreadsPublishConflictError } from "../lib/threads-publications.js";
 import {
+  ThreadsInsightsUnavailableError,
   ThreadsReconnectRequiredError,
   ThreadsRequestError,
 } from "../lib/threads-accounts.js";
@@ -28,6 +29,10 @@ export function threadsErrorHandler(
       reason: "needs_reconnect",
       accountId: err.accountId,
     });
+    return;
+  }
+  if (err instanceof ThreadsInsightsUnavailableError) {
+    res.status(409).json({ error: err.message, reason: err.reason, accountId: err.accountId });
     return;
   }
   if (err instanceof ThreadsPublishConflictError) {
