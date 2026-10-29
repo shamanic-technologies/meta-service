@@ -1277,7 +1277,17 @@
             "nullable": true
           },
           "text": {
-            "type": "string"
+            "type": "string",
+            "description": "The writer's words, as asked"
+          },
+          "publishedText": {
+            "type": "string",
+            "description": "What Threads received: text with the post's dy_post on every link to the brand's own site"
+          },
+          "linkTracking": {
+            "type": "string",
+            "nullable": true,
+            "description": "tracked:<links> | no_own_link | brand_unreadable | too_long | root_unknown (null before 2026-10-29)"
           },
           "publishedAt": {
             "type": "string"
@@ -1298,6 +1308,8 @@
           "postId",
           "permalink",
           "text",
+          "publishedText",
+          "linkTracking",
           "publishedAt"
         ]
       },

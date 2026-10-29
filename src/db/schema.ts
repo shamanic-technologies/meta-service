@@ -390,6 +390,11 @@ export const threadsPublications = pgTable(
     threadsPostId: text("threads_post_id"),
     permalink: text("permalink"),
     idempotencyKey: text("idempotency_key"),
+    // What Threads received: `text` with the post's dy_post on every link to the brand's own site
+    // (src/lib/own-link.ts). `text` stays the writer's words (the idempotency comparison).
+    publishedText: text("published_text"),
+    // tracked:<n links> | no_own_link | brand_unreadable | too_long
+    linkTracking: text("link_tracking"),
     // When the `post_published` outcome landed on runs-service (main posts only).
     outcomeDeclaredAt: timestamp("outcome_declared_at", { withTimezone: true }),
     publishedAt: timestamp("published_at", { withTimezone: true }),

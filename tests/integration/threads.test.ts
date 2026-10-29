@@ -25,6 +25,7 @@ const { db, sql } = await import("../../src/db/index.js");
 const { threadsAccounts, threadsOauthPending, threadsPublications } = await import("../../src/db/schema.js");
 const { encrypt, decrypt } = await import("../../src/lib/crypto.js");
 const { runTokenRefresh } = await import("../../src/lib/threads-accounts.js");
+const { resetBrandDomainCache } = await import("../../src/lib/services.js");
 const { createTestApp, getAuthHeaders } = await import("../helpers/test-app.js");
 
 const app = createTestApp();
@@ -43,6 +44,8 @@ const calls: Array<{ url: URL; body: URLSearchParams | null }> = [];
 const runsCalls: Array<{ url: URL; headers: Headers; body: any }> = [];
 let runsStatus = 201;
 let threadsDelayMs = 0;
+let brandCalls = 0;
+let brandStatus = 200;
 
 function defaultThreads(): Handler {
   return (url, init) => {
@@ -93,6 +96,14 @@ beforeAll(async () => {
       runsCalls.push({ url, headers: new Headers(init?.headers), body: JSON.parse(String(init?.body)) });
       return new Response(JSON.stringify({ recordedCount: 1 }), { status: runsStatus, headers: { "content-type": "application/json" } });
     }
+    if (url.host === "localhost:9998" && url.pathname.startsWith("/internal/brands/")) {
+      brandCalls++;
+      if (brandStatus !== 200) return new Response("{}", { status: brandStatus });
+      return new Response(JSON.stringify({ brand: { id: "brand-1", domain: "distribute.you", url: "https://distribute.you" } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
     if (!url.hostname.endsWith("threads.net")) return realFetch(input, init);
     calls.push({ url, body: init?.body ? new URLSearchParams(String(init.body)) : null });
     if (threadsDelayMs) await new Promise((r) => setTimeout(r, threadsDelayMs));
@@ -115,6 +126,8 @@ beforeEach(async () => {
   runsCalls.length = 0;
   runsStatus = 201;
   threadsDelayMs = 0;
+  brandStatus = 200;
+  resetBrandDomainCache();
 });
 
 async function connect(code: string, accountType = "pro_ai", headers = getAuthHeaders()) {
@@ -657,6 +670,52 @@ describe("Post insights (the Threads adapter of social-service's post metrics)",
     } finally {
       delete process.env.THREADS_INSIGHTS_SCOPE;
     }
+  });
+});
+
+describe("Own-link tracking at publish (dy_post)", () => {
+  const headers = () => ({ ...getAuthHeaders(), "x-run-id": "66666666-6666-6666-6666-666666666666", "x-brand-id": BRAND });
+  const sentTexts = () => calls.filter((c) => /\/threads$/.test(c.url.pathname)).map((c) => c.body!.get("text"));
+
+  it("the main post's link and its reply's link both carry the MAIN post's dy_post; the writer's text is stored as written", async () => {
+    const { body } = await connect("code-alice");
+    let n = 0;
+    const base = defaultThreads();
+    threadsHandler = (url, init) => {
+      if (/^\/v1\.0\/\d+\/threads_publish$/.test(url.pathname)) return { body: { id: `post-${++n}` } };
+      return base(url, init);
+    };
+    const main = await request(app).post(`/orgs/threads/accounts/${body.account.id}/posts`).set(headers()).send({ text: "Qualify first. Read distribute.you/blog/x." });
+    const reply = await request(app)
+      .post(`/orgs/threads/accounts/${body.account.id}/posts`)
+      .set(headers())
+      .send({ text: "Mail kevin@distribute.you or see dashboard.distribute.you.\n\nGet started: distribute.you", replyToPostId: main.body.postId });
+    const p = `dy_post=meta-service:${main.body.publicationId}`;
+    expect(sentTexts()).toEqual([
+      `Qualify first. Read distribute.you/blog/x?${p}.`,
+      `Mail kevin@distribute.you or see dashboard.distribute.you.\n\nGet started: distribute.you/?${p}`,
+    ]);
+    const [row] = await db.select().from(threadsPublications).where(eq(threadsPublications.id, reply.body.publicationId));
+    expect(row.text).toBe("Mail kevin@distribute.you or see dashboard.distribute.you.\n\nGet started: distribute.you");
+    expect(row.linkTracking).toBe("tracked:1");
+    expect(row.publishedText).toContain(p);
+  });
+
+  it("no own link, an unreadable brand, or a text the param would push past 500: published as written, the reason kept", async () => {
+    const { body } = await connect("code-alice");
+    const pub = (text: string) => request(app).post(`/orgs/threads/accounts/${body.account.id}/posts`).set(headers()).send({ text });
+    const none = await pub("No link here");
+    const long = await pub(`${"x".repeat(480)} distribute.you`);
+    resetBrandDomainCache();
+    brandStatus = 503;
+    const down = await pub("Get started: distribute.you");
+    expect([none, long, down].map((r) => r.status)).toEqual([201, 201, 201]);
+    const rows = await db.select().from(threadsPublications);
+    const byText = (t: string) => rows.find((r) => r.text === t)!;
+    expect(byText("No link here").linkTracking).toBe("no_own_link");
+    expect(byText(`${"x".repeat(480)} distribute.you`).linkTracking).toBe("too_long");
+    expect(byText("Get started: distribute.you").linkTracking).toBe("brand_unreadable");
+    expect(sentTexts()).toContain("Get started: distribute.you");
   });
 });
 

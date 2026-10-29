@@ -99,8 +99,14 @@ publishable server-side (`POST /orgs/threads/accounts/:id/posts`, text + optiona
   it is asked for, so turn it on only after the permission is added to the app's Threads use
   case, then reconnect). 409 reasons: `insights_scope_missing` (no Threads call),
   `insights_permission_missing` (Threads code 10, probed 2026-10-29 on our account),
-  `needs_reconnect`, `not_measurable`. A post's link that credits visits and signups to it
-  carries `dy_post=meta-service:<publication id>` (lead-service reads it off the visit's entry URL).
+  `needs_reconnect`, `not_measurable`.
+- **Every link to the brand's own site in a publication carries `dy_post=meta-service:<MAIN post
+  publication id>`, added at publish (`src/lib/own-link.ts`, byte-equal twin in social-service).**
+  lead-service reads it off the visit's entry URL and credits the visit and the signup after it to
+  the publishing run. The writer's words are untouched: `text` = as asked (idempotency),
+  `published_text` = what Threads got, `link_tracking` = `tracked:<n>` | `no_own_link` |
+  `brand_unreadable` | `too_long` (> 500 chars with the param) | `root_unknown`; none of those blocks
+  a publication. The domain is brand-service `GET /internal/brands/:id` `domain` (cached 1 h).
 - **The Threads tests run on a REAL Postgres** (`tests/integration/threads.test.ts`,
   CI `services: postgres`): locally point `META_SERVICE_DATABASE_URL` at a
   scratch database.
