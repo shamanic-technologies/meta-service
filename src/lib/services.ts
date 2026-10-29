@@ -198,3 +198,31 @@ export async function sendEmail(params: {
     );
   }
 }
+
+// ==================== brand-service ====================
+
+const brandDomainCache = new Map<string, { domain: string | null; at: number }>();
+const BRAND_DOMAIN_TTL_MS = 60 * 60 * 1000;
+
+/** The brand's own site domain (brand-service `GET /internal/brands/:id` `domain`), cached 1 h. Throws when unreadable. */
+export async function getBrandDomain(brandId: string): Promise<string | null> {
+  const hit = brandDomainCache.get(brandId);
+  if (hit && Date.now() - hit.at < BRAND_DOMAIN_TTL_MS) return hit.domain;
+  const base = process.env.BRAND_SERVICE_URL;
+  const key = process.env.BRAND_SERVICE_API_KEY;
+  if (!base || !key) throw new Error("BRAND_SERVICE_URL / BRAND_SERVICE_API_KEY not configured");
+  const response = await fetch(`${base.replace(/\/+$/, "")}/internal/brands/${encodeURIComponent(brandId)}`, {
+    headers: { "x-api-key": key },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) throw new Error(`brand-service GET /internal/brands/${brandId} returned ${response.status}`);
+  const body = (await response.json()) as { brand?: { domain?: string | null; url?: string | null } };
+  const domain = body.brand?.domain ?? body.brand?.url ?? null;
+  brandDomainCache.set(brandId, { domain, at: Date.now() });
+  return domain;
+}
+
+/** Test hook. */
+export function resetBrandDomainCache(): void {
+  brandDomainCache.clear();
+}

@@ -1017,7 +1017,9 @@ const ThreadsPublicationSchema = z
     threadRootPostId: z.string().nullable(),
     postId: z.string(),
     permalink: z.string().nullable(),
-    text: z.string(),
+    text: z.string().openapi({ description: "The writer's words, as asked" }),
+    publishedText: z.string().openapi({ description: "What Threads received: text with the post's dy_post on every link to the brand's own site" }),
+    linkTracking: z.string().nullable().openapi({ description: "tracked:<links> | no_own_link | brand_unreadable | too_long | root_unknown (null before 2026-10-29)" }),
     publishedAt: z.string(),
   })
   .openapi("ThreadsPublication");

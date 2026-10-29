@@ -18,7 +18,9 @@ import {
   type ThreadsAccount,
   type ThreadsPublication,
 } from "../db/schema.js";
-import { declareRunOutcomes } from "./services.js";
+import { declareRunOutcomes, getBrandDomain } from "./services.js";
+import { dyPostValue, withOwnLinkParam } from "./own-link.js";
+import { THREADS_TEXT_MAX } from "./threads-limits.js";
 import { publishPost, readPostInsights } from "./threads-accounts.js";
 import type { PostInsights } from "./threads-client.js";
 
@@ -140,6 +142,42 @@ async function answerExisting(
   return { publication: row, replayed: true, outcome: await ensureOutcome(row) };
 }
 
+/**
+ * Every link to the brand's own site carries the post's `dy_post` (src/lib/own-link.ts), so a visit
+ * and the signup after it credit the run that published it. A reply's links name the thread's MAIN
+ * post. Never blocks a publication: an unreadable brand or a text the parameter would push past
+ * Threads' limit publishes as written, the reason kept on the row and logged.
+ */
+async function trackOwnLinks(p: { orgId: string; brandId: string; claimId: string; rootPostId: string | null; text: string }): Promise<{ text: string; status: string }> {
+  let subjectId = p.claimId;
+  if (p.rootPostId) {
+    const [root] = await db
+      .select({ id: threadsPublications.id })
+      .from(threadsPublications)
+      .where(and(eq(threadsPublications.orgId, p.orgId), eq(threadsPublications.threadsPostId, p.rootPostId), eq(threadsPublications.kind, "post")))
+      .limit(1);
+    if (!root) {
+      console.warn(`[meta-service] LINK NOT TRACKED: reply under ${p.rootPostId}, whose main post is not on record`);
+      return { text: p.text, status: "root_unknown" };
+    }
+    subjectId = root.id;
+  }
+  let domain: string | null;
+  try {
+    domain = await getBrandDomain(p.brandId);
+  } catch (err) {
+    console.error(`[meta-service] LINK NOT TRACKED: brand ${p.brandId} domain unreadable:`, err instanceof Error ? err.message : err);
+    return { text: p.text, status: "brand_unreadable" };
+  }
+  const out = withOwnLinkParam(p.text, domain, dyPostValue(SUBJECT_SERVICE, subjectId));
+  if (out.count === 0) return { text: p.text, status: "no_own_link" };
+  if (out.text.length > THREADS_TEXT_MAX) {
+    console.warn(`[meta-service] LINK NOT TRACKED: publication ${p.claimId} would be ${out.text.length} chars with dy_post (limit ${THREADS_TEXT_MAX})`);
+    return { text: p.text, status: "too_long" };
+  }
+  return { text: out.text, status: `tracked:${out.count}` };
+}
+
 export async function publishAndRecord(params: {
   account: ThreadsAccount;
   identity: PublishIdentity;
@@ -185,16 +223,8 @@ export async function publishAndRecord(params: {
     return answerExisting(winner, account.id, text, replyToPostId);
   }
 
-  let post;
-  try {
-    post = await publishPost({ account, text, replyToPostId: replyToPostId ?? undefined });
-  } catch (err) {
-    // Nothing published: free the key so the caller can try again.
-    await db.delete(threadsPublications).where(eq(threadsPublications.id, claim.id));
-    throw err;
-  }
-
-  let threadRootPostId = post.postId;
+  // The thread's root publication: a reply's links credit the MAIN post (the one post_published).
+  let parentRoot: string | null = null;
   if (replyToPostId) {
     const [parent] = await db
       .select({ root: threadsPublications.threadRootPostId })
@@ -207,8 +237,20 @@ export async function publishAndRecord(params: {
         ),
       )
       .limit(1);
-    threadRootPostId = parent?.root ?? replyToPostId;
+    parentRoot = parent?.root ?? replyToPostId;
   }
+  const tracked = await trackOwnLinks({ orgId: identity.orgId, brandId: account.brandId, claimId: claim.id, rootPostId: parentRoot, text });
+
+  let post;
+  try {
+    post = await publishPost({ account, text: tracked.text, replyToPostId: replyToPostId ?? undefined });
+  } catch (err) {
+    // Nothing published: free the key so the caller can try again.
+    await db.delete(threadsPublications).where(eq(threadsPublications.id, claim.id));
+    throw err;
+  }
+
+  const threadRootPostId = parentRoot ?? post.postId;
 
   const now = new Date();
   const [published] = await db
@@ -218,6 +260,8 @@ export async function publishAndRecord(params: {
       threadsPostId: post.postId,
       permalink: post.permalink,
       threadRootPostId,
+      publishedText: tracked.text,
+      linkTracking: tracked.status,
       publishedAt: now,
       updatedAt: now,
     })
@@ -332,6 +376,8 @@ export function serialisePublication(row: ThreadsPublication) {
     postId: row.threadsPostId!,
     permalink: row.permalink,
     text: row.text,
+    publishedText: row.publishedText ?? row.text,
+    linkTracking: row.linkTracking,
     publishedAt: row.publishedAt!.toISOString(),
   };
 }

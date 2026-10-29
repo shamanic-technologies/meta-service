@@ -19,3 +19,5 @@ process.env.KEY_SERVICE_URL = "http://localhost:9999";
 process.env.KEY_SERVICE_API_KEY = "test-key-service-key";
 process.env.TRANSACTIONAL_EMAIL_SERVICE_URL = "http://localhost:9999";
 process.env.TRANSACTIONAL_EMAIL_SERVICE_API_KEY = "test-email-key";
+process.env.BRAND_SERVICE_URL = "http://localhost:9998";
+process.env.BRAND_SERVICE_API_KEY = "test-brand-key";
