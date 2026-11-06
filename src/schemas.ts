@@ -950,6 +950,10 @@ export const ThreadsPublishSchema = z
       description:
         "Caller's own key, unique per org. The same key again answers the publication it already made (200, `replayed: true`) and never calls Threads twice. The same key with another account, text or parent post is a 409 `idempotency_key_reused`.",
     }),
+    outcomeKey: z.enum(["post_published", "threads_post_published"]).optional().openapi({
+      description:
+        "The outcome a MAIN post declares on the caller's run. Default `post_published` (what the live Threads script declares today). `threads_post_published` = the Threads-specific outcome (OUTCOME-FINEST-1106), the one every imported post declares: a script opts in by sending it. Kept on the publication; a replay answers the stored one.",
+    }),
   })
   .openapi("ThreadsPublish");
 
@@ -970,12 +974,12 @@ const ThreadsPublishResponseSchema = z
     replayed: z.boolean().openapi({ description: "true when the idempotency key had already published this: nothing was published again" }),
     outcome: z
       .object({
-        outcomeKey: z.literal("post_published"),
+        outcomeKey: z.enum(["post_published", "threads_post_published"]),
         declared: z.boolean().openapi({ description: "false = runs-service refused or was unreachable; retried by the next call with the same idempotency key" }),
         error: z.string().nullable(),
       })
       .nullable()
-      .openapi({ description: "The `post_published` outcome declared on the caller's run (x-run-id), main posts only; null for a reply" }),
+      .openapi({ description: "The outcome (`post_published` by default, `threads_post_published` when asked) declared on the caller's run (x-run-id), main posts only; null for a reply" }),
   })
   .openapi("ThreadsPublishResponse");
 
@@ -1019,7 +1023,11 @@ const ThreadsPublicationSchema = z
     permalink: z.string().nullable(),
     text: z.string().openapi({ description: "The writer's words, as asked" }),
     publishedText: z.string().openapi({ description: "What Threads received: text with the post's dy_post on every link to the brand's own site" }),
-    linkTracking: z.string().nullable().openapi({ description: "tracked:<links> | no_own_link | brand_unreadable | too_long | root_unknown (null before 2026-10-29)" }),
+    linkTracking: z.string().nullable().openapi({ description: "tracked:<links> | no_own_link | brand_unreadable | too_long | root_unknown (null before 2026-10-29, and on an imported post)" }),
+    origin: z.enum(["published", "imported"]).openapi({ description: "published = this service published it; imported = read off the connected account (published outside us, hand posts included)" }),
+    performedBy: z.enum(["ours", "client_team"]).openapi({ description: "Who performed it: ours, or the client's own team (an imported post)" }),
+    outcomeKey: z.string().openapi({ description: "The outcome this main post declares: post_published | threads_post_published (every imported post)" }),
+    mediaType: z.string().nullable().openapi({ description: "Threads media_type of an imported post (TEXT_POST, IMAGE, VIDEO, CAROUSEL_ALBUM, AUDIO); null on a post we published (text)" }),
     publishedAt: z.string(),
   })
   .openapi("ThreadsPublication");
@@ -1202,7 +1210,7 @@ registry.registerPath({
   method: "get",
   path: "/internal/threads/measurable-posts",
   summary:
-    "Fleet-wide Threads MAIN posts whose post_published landed on runs-service, oldest first (keyset paged). What social-service measures (views, engagement) and declares outcomes on (FACTORY-P2-CONTENT-OUTCOMES).",
+    "Fleet-wide Threads MAIN posts whose outcome landed on runs-service, oldest first (keyset paged): posts we published (outcome post_published or threads_post_published) AND posts imported from a connected account (threads_post_published, performedBy client_team). What social-service measures (views, engagement) and declares outcomes on (FACTORY-P2-CONTENT-OUTCOMES). A reader consuming the post's outcome consumes `outcomeKey`.",
   security: [{ serviceKeyAuth: [] }],
   request: {
     query: z.object({
@@ -1222,7 +1230,8 @@ registry.registerPath({
               posts: z.array(
                 ThreadsPublicationSchema.extend({
                   orgId: z.string(),
-                  outcomeDeclaredAt: z.string().openapi({ description: "When post_published landed on runs-service (on runId)" }),
+                  outcomeDeclaredAt: z.string().openapi({ description: "When the post's outcome (`outcomeKey`) landed on runs-service" }),
+                  outcomeRunId: z.string().openapi({ description: "The run that outcome is declared on: runId for a post we published, the post's own unit run (child of runId) for an imported one" }),
                 }),
               ),
             })
@@ -1274,6 +1283,17 @@ registry.registerPath({
       content: { "application/json": { schema: ErrorResponseSchema } },
     },
     502: { description: "Threads refused the read (its code and message)", content: { "application/json": { schema: ErrorResponseSchema } } },
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/internal/threads/import",
+  summary:
+    "Run the Threads post import now (the same work its cron does): every connected account's own posts not on record land as publications (origin imported, performedBy client_team), each declaring threads_post_published dated at its Threads time, on runs of the CONNECTING org.",
+  security: [{ serviceKeyAuth: [] }],
+  responses: {
+    200: { description: "Import summary: accounts read, posts imported, outcomes declared, errors" },
   },
 });
 

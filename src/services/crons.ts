@@ -13,6 +13,7 @@
 import { runReviewSync } from "./review-sync.js";
 import { runSpendIngest } from "./spend-ingest.js";
 import { runTokenRefresh } from "../lib/threads-accounts.js";
+import { runThreadsImport } from "../lib/threads-import.js";
 
 const MINUTE = 60 * 1000;
 const HOUR = 60 * MINUTE;
@@ -93,6 +94,39 @@ export function startThreadsTokenRefresh(): NodeJS.Timeout {
         );
       })
       .catch((err) => console.error("[meta-service] threads token refresh failed:", err));
+  };
+
+  setTimeout(tick, firstTickMinutes * MINUTE);
+  return setInterval(tick, intervalHours * HOUR);
+}
+
+/**
+ * Every connected Threads account's own posts, hand posts included, imported as Units of
+ * threads_post_published (src/lib/threads-import.ts), on runs of the connecting org. In-function
+ * mutex: a slow pass is never overlapped by the next tick.
+ */
+export function startThreadsImport(): NodeJS.Timeout {
+  const intervalHours = numberFromEnv("THREADS_IMPORT_INTERVAL_HOURS", 6);
+  const firstTickMinutes = numberFromEnv("THREADS_IMPORT_FIRST_TICK_MINUTES", 4);
+
+  console.log(
+    `[meta-service] threads post import every ${intervalHours}h, first tick in ${firstTickMinutes}min`,
+  );
+
+  let running = false;
+  const tick = () => {
+    if (running) return;
+    running = true;
+    runThreadsImport()
+      .then((summary) => {
+        console.log(
+          `[meta-service] threads post import: accounts=${summary.accountsRead} skipped=${summary.accountsSkipped} imported=${summary.postsImported} declared=${summary.outcomesDeclared} errors=${summary.errors.length}${summary.errors.length ? ` (${summary.errors.map((e) => `${e.accountId}: ${e.error}`).join(" | ").slice(0, 1000)})` : ""}`,
+        );
+      })
+      .catch((err) => console.error("[meta-service] threads post import failed:", err))
+      .finally(() => {
+        running = false;
+      });
   };
 
   setTimeout(tick, firstTickMinutes * MINUTE);

@@ -350,3 +350,52 @@ export async function getPostInsights(token: string, postId: string): Promise<{ 
   const raw = await threadsFetch<unknown>("the post insights read", url.toString());
   return { insights: parseInsights(raw), raw };
 }
+
+/** One post of an account's own timeline (GET /{user}/threads): main posts only, replies are elsewhere. */
+export interface AccountPost {
+  id: string;
+  text: string | null;
+  permalink: string | null;
+  timestamp: string;
+  mediaType: string | null;
+}
+
+export interface AccountPostsPage {
+  posts: AccountPost[];
+  /** The cursor of the next (older) page; null = the last page. */
+  after: string | null;
+}
+
+/** A repost of someone else's post shows on the timeline as REPOST_FACADE: it is not a post of the account. */
+export const REPOST_MEDIA_TYPE = "REPOST_FACADE";
+
+/** One page of the account's published posts, newest first. Free (the Threads API bills nothing). */
+export async function listAccountPosts(params: {
+  token: string;
+  threadsUserId: string;
+  after?: string | null;
+  limit?: number;
+}): Promise<AccountPostsPage> {
+  const url = new URL(`${THREADS_API}/${params.threadsUserId}/threads`);
+  url.searchParams.set("fields", "id,text,permalink,timestamp,media_type");
+  url.searchParams.set("limit", String(params.limit ?? 100));
+  if (params.after) url.searchParams.set("after", params.after);
+  url.searchParams.set("access_token", params.token);
+  const body = await threadsFetch<{
+    data?: Array<{ id?: unknown; text?: unknown; permalink?: unknown; timestamp?: unknown; media_type?: unknown }>;
+    paging?: { cursors?: { after?: string }; next?: string };
+  }>("the account posts read", url.toString());
+  const posts: AccountPost[] = [];
+  for (const p of body.data ?? []) {
+    if (p.id === undefined || p.id === null || typeof p.timestamp !== "string") continue;
+    posts.push({
+      id: String(p.id),
+      text: typeof p.text === "string" ? p.text : null,
+      permalink: typeof p.permalink === "string" ? p.permalink : null,
+      timestamp: p.timestamp,
+      mediaType: typeof p.media_type === "string" ? p.media_type : null,
+    });
+  }
+  const after = body.paging?.next ? (body.paging.cursors?.after ?? null) : null;
+  return { posts, after };
+}

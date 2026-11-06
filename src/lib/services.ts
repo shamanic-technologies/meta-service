@@ -77,6 +77,13 @@ export interface ProducedOutcome {
   outcomeKey: string;
   subjectService: string;
   subjectId: string;
+  /** WHO performed it (runs-service OUTCOME-PERFORMER-1106): client_team = the client's own team. */
+  performer?: { kind: "client_team"; name?: string };
+}
+
+export interface DeclareOptions {
+  /** A past fact's own time (runs-service `occurredAt`): only on a spend-free run of this service. */
+  occurredAt?: string;
 }
 
 /**
@@ -90,6 +97,7 @@ export async function declareRunOutcomes(
   orgId: string,
   produced: ProducedOutcome[],
   waitsMs: number[] = [1000, 3000],
+  options: DeclareOptions = {},
 ): Promise<void> {
   const url = `${RUNS_SERVICE_URL()}/v1/runs/${encodeURIComponent(runId)}/outcomes`;
   let last = "";
@@ -101,8 +109,10 @@ export async function declareRunOutcomes(
           "Content-Type": "application/json",
           "X-API-Key": RUNS_SERVICE_API_KEY(),
           "x-org-id": orgId,
+          // runs-service lets only the run's own service date a fact before the run's start.
+          "x-service-name": "meta-service",
         },
-        body: JSON.stringify({ produced }),
+        body: JSON.stringify(options.occurredAt ? { produced, occurredAt: options.occurredAt } : { produced }),
         signal: AbortSignal.timeout(30_000),
       });
       if (response.ok) return;

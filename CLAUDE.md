@@ -100,6 +100,25 @@ publishable server-side (`POST /orgs/threads/accounts/:id/posts`, text + optiona
   case, then reconnect). 409 reasons: `insights_scope_missing` (no Threads call),
   `insights_permission_missing` (Threads code 10, probed 2026-10-29 on our account),
   `needs_reconnect`, `not_measurable`.
+- **The outcome is as fine as possible: `threads_post_published` (OUTCOME-FINEST-1106).** Every
+  imported post declares it; the publish route declares it when the body says
+  `outcomeKey: "threads_post_published"`, else `post_published` (what the live Threads script
+  declares, until its dynasty upgrades: never flip the default here). The step is a
+  features-service catalogue row (declared 2026-11-06); a new key needs its row first, or runs-service
+  400s `unknown_outcome_key`.
+- **A connected account imports EVERY own post, hand posts included (`src/lib/threads-import.ts`,
+  cron 6 h, `POST /internal/threads/import`).** A post not on record (same Threads user + post id in
+  the org) lands with `origin: imported`, `performedBy: client_team`; reposts (REPOST_FACADE) are
+  skipped. The import run (`threads-post-import`) is the post's `runId`; the outcome is declared on a
+  spend-free UNIT run (`threads-post-imported`, child, key `threads-import:<id>`) DATED at the post's
+  Threads time, performer `client_team`: a run holding a dated fact takes no child run
+  (runs-service `run_holds_dated_facts`), so social-service hangs its post_viewed runs on the import
+  run. First walk reads every page (cap `THREADS_IMPORT_MAX_PAGES`, 20); later passes stop at the
+  first page with nothing new. measurable-posts serves both kinds with `outcomeKey` + `outcomeRunId`.
+- **Every Threads call for a connected account outside a request runs on a run of the CONNECTING
+  org** (import, insights read, token refresh; `src/lib/threads-runs.ts`, identity = the account
+  row's org, brand, connecting user). Free API: no cost line. Before 2026-11-06 the insights reads
+  and token refreshes ran on no run at all (nothing billed anyone).
 - **Every link to the brand's own site in a publication carries `dy_post=meta-service:<MAIN post
   publication id>`, added at publish (`src/lib/own-link.ts`, byte-equal twin in social-service).**
   lead-service reads it off the visit's entry URL and credits the visit and the signup after it to

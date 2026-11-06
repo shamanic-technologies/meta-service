@@ -1151,7 +1151,8 @@
               "outcomeKey": {
                 "type": "string",
                 "enum": [
-                  "post_published"
+                  "post_published",
+                  "threads_post_published"
                 ]
               },
               "declared": {
@@ -1168,7 +1169,7 @@
               "declared",
               "error"
             ],
-            "description": "The `post_published` outcome declared on the caller's run (x-run-id), main posts only; null for a reply"
+            "description": "The outcome (`post_published` by default, `threads_post_published` when asked) declared on the caller's run (x-run-id), main posts only; null for a reply"
           }
         },
         "required": [
@@ -1203,6 +1204,14 @@
             "minLength": 1,
             "maxLength": 512,
             "description": "Caller's own key, unique per org. The same key again answers the publication it already made (200, `replayed: true`) and never calls Threads twice. The same key with another account, text or parent post is a 409 `idempotency_key_reused`."
+          },
+          "outcomeKey": {
+            "type": "string",
+            "enum": [
+              "post_published",
+              "threads_post_published"
+            ],
+            "description": "The outcome a MAIN post declares on the caller's run. Default `post_published` (what the live Threads script declares today). `threads_post_published` = the Threads-specific outcome (OUTCOME-FINEST-1106), the one every imported post declares: a script opts in by sending it. Kept on the publication; a replay answers the stored one."
           }
         },
         "required": [
@@ -1287,7 +1296,32 @@
           "linkTracking": {
             "type": "string",
             "nullable": true,
-            "description": "tracked:<links> | no_own_link | brand_unreadable | too_long | root_unknown (null before 2026-10-29)"
+            "description": "tracked:<links> | no_own_link | brand_unreadable | too_long | root_unknown (null before 2026-10-29, and on an imported post)"
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "published",
+              "imported"
+            ],
+            "description": "published = this service published it; imported = read off the connected account (published outside us, hand posts included)"
+          },
+          "performedBy": {
+            "type": "string",
+            "enum": [
+              "ours",
+              "client_team"
+            ],
+            "description": "Who performed it: ours, or the client's own team (an imported post)"
+          },
+          "outcomeKey": {
+            "type": "string",
+            "description": "The outcome this main post declares: post_published | threads_post_published (every imported post)"
+          },
+          "mediaType": {
+            "type": "string",
+            "nullable": true,
+            "description": "Threads media_type of an imported post (TEXT_POST, IMAGE, VIDEO, CAROUSEL_ALBUM, AUDIO); null on a post we published (text)"
           },
           "publishedAt": {
             "type": "string"
@@ -1310,6 +1344,10 @@
           "text",
           "publishedText",
           "linkTracking",
+          "origin",
+          "performedBy",
+          "outcomeKey",
+          "mediaType",
           "publishedAt"
         ]
       },
@@ -1331,12 +1369,17 @@
                     },
                     "outcomeDeclaredAt": {
                       "type": "string",
-                      "description": "When post_published landed on runs-service (on runId)"
+                      "description": "When the post's outcome (`outcomeKey`) landed on runs-service"
+                    },
+                    "outcomeRunId": {
+                      "type": "string",
+                      "description": "The run that outcome is declared on: runId for a post we published, the post's own unit run (child of runId) for an imported one"
                     }
                   },
                   "required": [
                     "orgId",
-                    "outcomeDeclaredAt"
+                    "outcomeDeclaredAt",
+                    "outcomeRunId"
                   ]
                 }
               ]
@@ -3434,7 +3477,7 @@
     },
     "/internal/threads/measurable-posts": {
       "get": {
-        "summary": "Fleet-wide Threads MAIN posts whose post_published landed on runs-service, oldest first (keyset paged). What social-service measures (views, engagement) and declares outcomes on (FACTORY-P2-CONTENT-OUTCOMES).",
+        "summary": "Fleet-wide Threads MAIN posts whose outcome landed on runs-service, oldest first (keyset paged): posts we published (outcome post_published or threads_post_published) AND posts imported from a connected account (threads_post_published, performedBy client_team). What social-service measures (views, engagement) and declares outcomes on (FACTORY-P2-CONTENT-OUTCOMES). A reader consuming the post's outcome consumes `outcomeKey`.",
         "security": [
           {
             "serviceKeyAuth": []
@@ -3577,6 +3620,21 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/internal/threads/import": {
+      "post": {
+        "summary": "Run the Threads post import now (the same work its cron does): every connected account's own posts not on record land as publications (origin imported, performedBy client_team), each declaring threads_post_published dated at its Threads time, on runs of the CONNECTING org.",
+        "security": [
+          {
+            "serviceKeyAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Import summary: accounts read, posts imported, outcomes declared, errors"
           }
         }
       }
