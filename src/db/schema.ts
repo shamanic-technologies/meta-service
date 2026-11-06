@@ -7,9 +7,10 @@ import {
   integer,
   index,
   unique,
+  uniqueIndex,
   jsonb,
 } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 
 // ==================== meta_connections ====================
 
@@ -282,3 +283,164 @@ export type MetaManagedAd = typeof metaManagedAds.$inferSelect;
 export type NewMetaManagedAd = typeof metaManagedAds.$inferInsert;
 export type MetaAdsSpendDaily = typeof metaAdsSpendDaily.$inferSelect;
 export type NewMetaAdsSpendDaily = typeof metaAdsSpendDaily.$inferInsert;
+
+// ==================== Threads accounts ====================
+//
+// A Threads account a user connected for one of their brands, through Threads'
+// own OAuth on our Meta app. Any number per brand, of any type; the same Threads
+// account connected twice on a brand is ONE row (the unique key below), so a
+// reconnect refreshes the token in place instead of adding a duplicate.
+
+export const threadsAccounts = pgTable(
+  "threads_accounts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: text("org_id").notNull(),
+    brandId: text("brand_id").notNull(),
+    // Who connected it last. The account belongs to the brand, not to them.
+    connectedByUserId: text("connected_by_user_id").notNull(),
+    threadsUserId: text("threads_user_id").notNull(),
+    username: text("username").notNull(),
+    name: text("name"),
+    profilePictureUrl: text("profile_picture_url"),
+    // pro_human | personal_human | pro_ai (src/lib/threads-accounts.ts)
+    accountType: text("account_type").notNull(),
+    accessToken: text("access_token").notNull(), // encrypted at rest
+    tokenIssuedAt: timestamp("token_issued_at", { withTimezone: true }).notNull(),
+    tokenExpiresAt: timestamp("token_expires_at", { withTimezone: true }).notNull(),
+    scopes: text("scopes").array().notNull(),
+    // connected | needs_reconnect — set by whoever observed the token die.
+    status: text("status").notNull().default("connected"),
+    statusReason: text("status_reason"),
+    // When the post import last walked the account's timeline to its end (src/lib/threads-import.ts):
+    // null = never, so the next pass reads every page; afterwards a pass stops at the first known page.
+    postsImportedAt: timestamp("posts_imported_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("idx_threads_accounts_org_brand").on(table.orgId, table.brandId),
+    index("idx_threads_accounts_token_expires").on(table.tokenExpiresAt),
+    unique("uq_threads_accounts_brand_user").on(
+      table.orgId,
+      table.brandId,
+      table.threadsUserId,
+    ),
+  ],
+);
+
+/**
+ * A Threads login in flight: the random `state` handed to Threads, and what the
+ * caller asked for when they started it. Single use, short-lived, and bound to
+ * the org that started it, so a callback can never land an account in another
+ * org.
+ */
+export const threadsOauthPending = pgTable(
+  "threads_oauth_pending",
+  {
+    state: text("state").primaryKey(),
+    orgId: text("org_id").notNull(),
+    userId: text("user_id").notNull(),
+    brandId: text("brand_id").notNull(),
+    accountType: text("account_type").notNull(),
+    redirectUri: text("redirect_uri").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index("idx_threads_oauth_pending_expires").on(table.expiresAt)],
+);
+
+export type ThreadsAccount = typeof threadsAccounts.$inferSelect;
+export type NewThreadsAccount = typeof threadsAccounts.$inferInsert;
+export type ThreadsOauthPending = typeof threadsOauthPending.$inferSelect;
+
+// ==================== Threads publications ====================
+//
+// Every post and reply this service published on a Threads account, kept so a
+// caller can read what a campaign (or a brand) published, where and when, and so
+// a publish can be idempotent on the caller's own key. The identity columns come
+// from the request headers (x-org-id, x-user-id, x-run-id, x-campaign-id); the
+// brand and the account are the ACCOUNT's, snapshotted, so a disconnected
+// account keeps its history readable. A row is `publishing` while the Threads
+// call is in flight (the idempotency claim) and `published` once it landed.
+
+export const threadsPublications = pgTable(
+  "threads_publications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: text("org_id").notNull(),
+    brandId: text("brand_id").notNull(),
+    accountId: uuid("account_id").notNull(),
+    threadsUserId: text("threads_user_id").notNull(),
+    accountUsername: text("account_username").notNull(),
+    accountType: text("account_type").notNull(),
+    userId: text("user_id").notNull(),
+    runId: text("run_id").notNull(),
+    campaignId: text("campaign_id"),
+    // post | reply
+    kind: text("kind").notNull(),
+    replyToPostId: text("reply_to_post_id"),
+    // The Threads id of the main post this publication belongs to (itself for a post).
+    threadRootPostId: text("thread_root_post_id"),
+    text: text("text").notNull(),
+    // publishing | published
+    status: text("status").notNull().default("publishing"),
+    threadsPostId: text("threads_post_id"),
+    permalink: text("permalink"),
+    idempotencyKey: text("idempotency_key"),
+    // What Threads received: `text` with the post's dy_post on every link to the brand's own site
+    // (src/lib/own-link.ts). `text` stays the writer's words (the idempotency comparison).
+    publishedText: text("published_text"),
+    // tracked:<n links> | no_own_link | brand_unreadable | too_long
+    linkTracking: text("link_tracking"),
+    // published = this service published it | imported = read off the connected account (a post
+    // published outside us, hand posts included: src/lib/threads-import.ts).
+    origin: text("origin").notNull().default("published"),
+    // Who performed it: ours | client_team (an imported post we did not publish).
+    performedBy: text("performed_by").notNull().default("ours"),
+    // The outcome a MAIN post declares: post_published (the default of the publish route, what the
+    // live Threads script reads) | threads_post_published (imported posts, and a caller that opts in).
+    outcomeKey: text("outcome_key").notNull().default("post_published"),
+    // The run the outcome is declared on when it is not `run_id` (an imported post: its own unit run,
+    // child of the import run, dated at the post's own time).
+    outcomeRunId: text("outcome_run_id"),
+    // Threads' media_type for an imported post (TEXT_POST, IMAGE, VIDEO, CAROUSEL_ALBUM, AUDIO).
+    mediaType: text("media_type"),
+    // When the post's outcome landed on runs-service (main posts only).
+    outcomeDeclaredAt: timestamp("outcome_declared_at", { withTimezone: true }),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    unique("uq_threads_publications_org_key").on(table.orgId, table.idempotencyKey),
+    index("idx_threads_publications_campaign").on(
+      table.orgId,
+      table.campaignId,
+      table.publishedAt,
+    ),
+    index("idx_threads_publications_brand").on(
+      table.orgId,
+      table.brandId,
+      table.publishedAt,
+    ),
+    index("idx_threads_publications_post").on(table.orgId, table.threadsPostId),
+    uniqueIndex("uq_threads_publications_account_post")
+      .on(table.accountId, table.threadsPostId)
+      // Imported posts only: one import per post per account (a post we published is matched in code).
+      .where(sql`${table.origin} = 'imported'`),
+  ],
+);
+
+export type ThreadsPublication = typeof threadsPublications.$inferSelect;
+export type NewThreadsPublication = typeof threadsPublications.$inferInsert;

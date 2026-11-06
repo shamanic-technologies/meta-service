@@ -24,6 +24,16 @@ older per-user OAuth path, where a user authorises their own Meta account. It
 stays for whatever already uses it, and it is never involved in a managed
 launch.
 
+**Threads accounts (`/orgs/threads/*`).** Any user connects any number of
+Threads accounts to a brand through Threads' own OAuth on our Meta app (platform
+keys `threads-app-id`, `threads-app-secret`). The page Threads redirects to is
+the CALLER's (the dashboard), which posts `code` + `state` back to
+`/orgs/threads/auth/callback`; meta-service has no public hostname, so it never
+receives a browser redirect. Each account carries the owner's account type
+(`pro_human` | `personal_human` | `pro_ai`, `src/lib/account-types.ts`), is
+publishable server-side (`POST /orgs/threads/accounts/:id/posts`, text + optional
+`replyToPostId`), and its long-lived token is refreshed by its own cron.
+
 ## Invariants worth not relearning
 
 - **Ads are TEXT ONLY.** `createLinkCreative` sends `link_data` with no
@@ -56,6 +66,69 @@ launch.
   (the request cannot be satisfied as written — 400, names the field) and
   `MetaApiCallError` (Meta refused — 502, carries Meta's code and message). Do
   not let any of these fall through to the generic 500 handler.
+- **One Threads account per brand is ONE row** (unique org + brand + Threads
+  user id): a reconnect refreshes it in place. A token Threads refuses (code
+  190/102) flips the account to `needs_reconnect` with a plain reason, and a
+  publish on it is a 409 `reason: needs_reconnect`, never a 500. The Threads API
+  is free: publishing declares no cost.
+- **Every Threads publication is on record, idempotent, and a MAIN post is one
+  `post_published` outcome (THREADS-CAMPAIGN-1028).** `threads_publications`
+  keeps each post/reply (account snapshot, the account's brand, org, user, run,
+  `x-campaign-id`, kind `post|reply`, parent + thread root post, text, permalink,
+  time). `idempotencyKey` (body, unique per org) is claimed by a `publishing` row
+  BEFORE Threads is called: same key = the same publication answered (200,
+  `replayed: true`), a key naming another account/text/parent or still in flight
+  = 409 `idempotency_key_reused` / `publish_in_progress`; a Threads refusal frees
+  the key. A main post declares `post_published` (subject `meta-service` /
+  publication id) on the CALLER's run (`POST /v1/runs/{x-run-id}/outcomes`); a
+  reply declares nothing (one thread = one outcome, billing counts it). A refused
+  declaration never unpublishes: answered `outcome.declared: false`, logged
+  `OUTCOME NOT DECLARED`, retried by the replay. `GET /orgs/threads/publications
+  ?campaignId=&brandId=&since=&until=&limit=` (one of the first two required,
+  default 30 days, newest first) is what a campaign workflow reads each run for
+  spacing, rotation and subjects. No type gate and no queue here: account choice
+  and spacing are the workflow's.
+- **What a post led to is measured in social-service, not here (FACTORY-P2-CONTENT-OUTCOMES).**
+  Two service-key reads are its Threads adapter: `GET /internal/threads/measurable-posts`
+  (fleet-wide MAIN posts whose `post_published` landed, with org + publishing run, oldest
+  first, keyset `afterPublishedAt`+`afterId`) and `GET /internal/threads/publications/:id/insights`
+  (live lifetime views, likes, replies, reposts, quotes, shares; free; stores nothing; a metric
+  Threads omits is null). social-service keeps the series and declares `post_viewed` /
+  `post_engaged`. Insights need `threads_manage_insights`: asked at connect only with
+  `THREADS_INSIGHTS_SCOPE=on` (Threads refuses the whole login when our Meta app lacks a scope
+  it is asked for, so turn it on only after the permission is added to the app's Threads use
+  case, then reconnect). 409 reasons: `insights_scope_missing` (no Threads call),
+  `insights_permission_missing` (Threads code 10, probed 2026-10-29 on our account),
+  `needs_reconnect`, `not_measurable`.
+- **The outcome is as fine as possible: `threads_post_published` (OUTCOME-FINEST-1106).** Every
+  imported post declares it; the publish route declares it when the body says
+  `outcomeKey: "threads_post_published"`, else `post_published` (what the live Threads script
+  declares, until its dynasty upgrades: never flip the default here). The step is a
+  features-service catalogue row (declared 2026-11-06); a new key needs its row first, or runs-service
+  400s `unknown_outcome_key`.
+- **A connected account imports EVERY own post, hand posts included (`src/lib/threads-import.ts`,
+  cron 6 h, `POST /internal/threads/import`).** A post not on record (same Threads user + post id in
+  the org) lands with `origin: imported`, `performedBy: client_team`; reposts (REPOST_FACADE) are
+  skipped. The import run (`threads-post-import`) is the post's `runId`; the outcome is declared on a
+  spend-free UNIT run (`threads-post-imported`, child, key `threads-import:<id>`) DATED at the post's
+  Threads time, performer `client_team`: a run holding a dated fact takes no child run
+  (runs-service `run_holds_dated_facts`), so social-service hangs its post_viewed runs on the import
+  run. First walk reads every page (cap `THREADS_IMPORT_MAX_PAGES`, 20); later passes stop at the
+  first page with nothing new. measurable-posts serves both kinds with `outcomeKey` + `outcomeRunId`.
+- **Every Threads call for a connected account outside a request runs on a run of the CONNECTING
+  org** (import, insights read, token refresh; `src/lib/threads-runs.ts`, identity = the account
+  row's org, brand, connecting user). Free API: no cost line. Before 2026-11-06 the insights reads
+  and token refreshes ran on no run at all (nothing billed anyone).
+- **Every link to the brand's own site in a publication carries `dy_post=meta-service:<MAIN post
+  publication id>`, added at publish (`src/lib/own-link.ts`, byte-equal twin in social-service).**
+  lead-service reads it off the visit's entry URL and credits the visit and the signup after it to
+  the publishing run. The writer's words are untouched: `text` = as asked (idempotency),
+  `published_text` = what Threads got, `link_tracking` = `tracked:<n>` | `no_own_link` |
+  `brand_unreadable` | `too_long` (> 500 chars with the param) | `root_unknown`; none of those blocks
+  a publication. The domain is brand-service `GET /internal/brands/:id` `domain` (cached 1 h).
+- **The Threads tests run on a REAL Postgres** (`tests/integration/threads.test.ts`,
+  CI `services: postgres`): locally point `META_SERVICE_DATABASE_URL` at a
+  scratch database.
 - **Cost names are NOT registered from here.** They live in costs-service's seed;
   `PUT /v1/providers-costs/{name}` only versions a name that already exists.
 

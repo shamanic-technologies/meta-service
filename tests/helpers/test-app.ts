@@ -7,6 +7,8 @@ import connectionsRoutes from "../../src/routes/connections.js";
 import accountsRoutes from "../../src/routes/accounts.js";
 import insightsRoutes from "../../src/routes/insights.js";
 import managedRoutes from "../../src/routes/managed.js";
+import threadsRoutes from "../../src/routes/threads.js";
+import { threadsErrorHandler } from "../../src/middleware/threads-errors.js";
 import internalRoutes from "../../src/routes/internal.js";
 import { ManagedRequestError, MetaApiCallError } from "../../src/lib/meta-ads.js";
 import { PlatformCredentialError } from "../../src/lib/key-service.js";
@@ -36,11 +38,14 @@ export function createTestApp() {
   app.use(accountsRoutes);
   app.use(insightsRoutes);
   app.use(managedRoutes);
+  app.use(threadsRoutes);
 
   // 404
   app.use((_req, res) => {
     res.status(404).json({ error: "Not found" });
   });
+
+  app.use(threadsErrorHandler);
 
   app.use(
     (

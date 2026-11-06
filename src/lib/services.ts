@@ -6,7 +6,7 @@ const RUNS_SERVICE_API_KEY = () => process.env.RUNS_SERVICE_API_KEY || "";
 
 async function runsRequest<T>(
   path: string,
-  options: { method?: string; body?: unknown; idempotencyKey?: string } = {},
+  options: { method?: string; body?: unknown; idempotencyKey?: string; headers?: Record<string, string> } = {},
 ): Promise<T> {
   const response = await fetch(`${RUNS_SERVICE_URL()}${path}`, {
     method: options.method || "GET",
@@ -16,6 +16,7 @@ async function runsRequest<T>(
       ...(options.idempotencyKey
         ? { "Idempotency-Key": options.idempotencyKey }
         : {}),
+      ...(options.headers ?? {}),
     },
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
@@ -38,10 +39,19 @@ export async function createRun(params: {
   campaignId?: string;
   featureSlug?: string;
 }, idempotencyKey?: string): Promise<{ id: string }> {
+  // runs-service POST /v1/runs reads the identity from HEADERS (x-org-id required, x-user-id, x-run-id = the parent,
+  // x-brand-id) and the dedup key from the BODY: sent in the body, every run open here 400'd
+  // ("x-org-id header is required"), so the Threads import, insights read and token refresh never ran (2026-11-06).
+  const headers: Record<string, string> = { "x-org-id": params.orgId };
+  if (params.userId) headers["x-user-id"] = params.userId;
+  if (params.parentRunId) headers["x-run-id"] = params.parentRunId;
+  if (params.brandId) headers["x-brand-id"] = params.brandId;
+  if (params.campaignId) headers["x-campaign-id"] = params.campaignId;
+  if (params.featureSlug) headers["x-feature-slug"] = params.featureSlug;
   return runsRequest("/v1/runs", {
     method: "POST",
-    body: params,
-    idempotencyKey,
+    headers,
+    body: { serviceName: params.serviceName, taskName: params.taskName, ...(idempotencyKey ? { idempotencyKey } : {}) },
   });
 }
 
@@ -71,6 +81,61 @@ export async function completeRun(
     method: "PATCH",
     body: { status, error },
   });
+}
+
+export interface ProducedOutcome {
+  outcomeKey: string;
+  subjectService: string;
+  subjectId: string;
+  /** WHO performed it (runs-service OUTCOME-PERFORMER-1106): client_team = the client's own team. */
+  performer?: { kind: "client_team"; name?: string };
+}
+
+export interface DeclareOptions {
+  /** A past fact's own time (runs-service `occurredAt`): only on a spend-free run of this service. */
+  occurredAt?: string;
+}
+
+/**
+ * Declare what the CALLER's run produced (runs-service `POST /v1/runs/{id}/outcomes`,
+ * org-scoped by `x-org-id`). Idempotent on runs-service's side: a replay answers
+ * `already_recorded`. Retries a transport error, a 429 or a 5xx; throws on the last
+ * failure so the caller can record the miss loudly.
+ */
+export async function declareRunOutcomes(
+  runId: string,
+  orgId: string,
+  produced: ProducedOutcome[],
+  waitsMs: number[] = [1000, 3000],
+  options: DeclareOptions = {},
+): Promise<void> {
+  const url = `${RUNS_SERVICE_URL()}/v1/runs/${encodeURIComponent(runId)}/outcomes`;
+  let last = "";
+  for (let attempt = 0; attempt <= waitsMs.length; attempt++) {
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-API-Key": RUNS_SERVICE_API_KEY(),
+          "x-org-id": orgId,
+          // runs-service lets only the run's own service date a fact before the run's start.
+          "x-service-name": "meta-service",
+        },
+        body: JSON.stringify(options.occurredAt ? { produced, occurredAt: options.occurredAt } : { produced }),
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (response.ok) return;
+      last = `${response.status} ${await response.text().catch(() => "")}`;
+      if (response.status < 500 && response.status !== 429) break;
+    } catch (err) {
+      last = err instanceof Error ? err.message : String(err);
+    }
+    if (attempt < waitsMs.length) {
+      await new Promise((r) => setTimeout(r, waitsMs[attempt]));
+    }
+  }
+  throw new Error(`runs-service POST /v1/runs/${runId}/outcomes failed: ${last}`);
 }
 
 // ==================== costs-service ====================
@@ -152,4 +217,32 @@ export async function sendEmail(params: {
       `[meta-service] Failed to send email ${params.eventType}: ${response.status} ${text}`,
     );
   }
+}
+
+// ==================== brand-service ====================
+
+const brandDomainCache = new Map<string, { domain: string | null; at: number }>();
+const BRAND_DOMAIN_TTL_MS = 60 * 60 * 1000;
+
+/** The brand's own site domain (brand-service `GET /internal/brands/:id` `domain`), cached 1 h. Throws when unreadable. */
+export async function getBrandDomain(brandId: string): Promise<string | null> {
+  const hit = brandDomainCache.get(brandId);
+  if (hit && Date.now() - hit.at < BRAND_DOMAIN_TTL_MS) return hit.domain;
+  const base = process.env.BRAND_SERVICE_URL;
+  const key = process.env.BRAND_SERVICE_API_KEY;
+  if (!base || !key) throw new Error("BRAND_SERVICE_URL / BRAND_SERVICE_API_KEY not configured");
+  const response = await fetch(`${base.replace(/\/+$/, "")}/internal/brands/${encodeURIComponent(brandId)}`, {
+    headers: { "x-api-key": key },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) throw new Error(`brand-service GET /internal/brands/${brandId} returned ${response.status}`);
+  const body = (await response.json()) as { brand?: { domain?: string | null; url?: string | null } };
+  const domain = body.brand?.domain ?? body.brand?.url ?? null;
+  brandDomainCache.set(brandId, { domain, at: Date.now() });
+  return domain;
+}
+
+/** Test hook. */
+export function resetBrandDomainCache(): void {
+  brandDomainCache.clear();
 }

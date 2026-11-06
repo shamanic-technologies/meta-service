@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ACCOUNT_TYPES, ACCOUNT_TYPE_VALUES } from "./lib/account-types.js";
 import {
   OpenAPIRegistry,
   extendZodWithOpenApi,
@@ -483,6 +484,11 @@ const IdentityHeadersSchema = z.object({
   "x-run-id": z.string().openapi({ description: "Caller's run ID" }),
 });
 
+const ThreadsPublishHeadersSchema = IdentityHeadersSchema.extend({
+  "x-campaign-id": z.string().optional().openapi({ description: "Campaign the publication is made for (kept on the record, read back by campaign)" }),
+  "x-brand-id": z.string().optional().openapi({ description: "Caller's brand (the record keeps the ACCOUNT's brand)" }),
+});
+
 export const OptimizationGoalSchema = z
   .enum([
     "REACH",
@@ -856,5 +862,448 @@ registry.registerPath({
       description: "Ingest failed",
       content: { "application/json": { schema: ErrorResponseSchema } },
     },
+  },
+});
+
+// ==================== Threads accounts ====================
+//
+// Any user connects any number of Threads accounts to a brand through Threads'
+// own login. The dashboard page that receives Threads' redirect hands the
+// `code` and `state` back to POST /orgs/threads/auth/callback.
+
+const accountTypeDescription = `Who runs the account: ${Object.entries(ACCOUNT_TYPES)
+  .map(([value, label]) => `\`${value}\` = ${label}`)
+  .join(", ")}`;
+
+export const AccountTypeSchema = z
+  .enum(ACCOUNT_TYPE_VALUES)
+  .openapi("AccountType", { description: accountTypeDescription });
+
+export const ThreadsConnectStartSchema = z
+  .object({
+    brandId: z.string().min(1).openapi({ description: "Brand the account is connected to" }),
+    accountType: AccountTypeSchema,
+    redirectUri: z.string().url().openapi({
+      description:
+        "Page Threads sends the user back to with `code` and `state`. Must be registered, byte for byte, as a redirect callback URL of our Threads app.",
+    }),
+  })
+  .openapi("ThreadsConnectStart");
+
+const ThreadsConnectStartResponseSchema = z
+  .object({
+    authorizationUrl: z.string().url().openapi({ description: "Send the user here to log into Threads" }),
+    state: z.string(),
+    expiresAt: z.string().openapi({ description: "The login must finish before this time (15 minutes)" }),
+  })
+  .openapi("ThreadsConnectStartResponse");
+
+export const ThreadsConnectCallbackSchema = z
+  .object({
+    code: z.string().min(1).openapi({ description: "`code` from Threads' redirect" }),
+    state: z.string().min(1).openapi({ description: "`state` from Threads' redirect" }),
+  })
+  .openapi("ThreadsConnectCallback");
+
+const ThreadsAccountSchema = z
+  .object({
+    id: z.string().uuid(),
+    brandId: z.string(),
+    threadsUserId: z.string(),
+    username: z.string(),
+    name: z.string().nullable(),
+    profilePictureUrl: z.string().nullable(),
+    profileUrl: z.string(),
+    accountType: AccountTypeSchema,
+    accountTypeLabel: z.string().openapi({ description: "Human label of accountType, e.g. Pro (AI)" }),
+    health: z.enum(["connected", "needs_reconnect"]).openapi({
+      description: "`needs_reconnect` = Threads no longer accepts this login; a human must connect it again",
+    }),
+    healthReason: z.string().nullable().openapi({ description: "Plain-language reason when health is needs_reconnect" }),
+    tokenExpiresAt: z.string(),
+    connectedByUserId: z.string(),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  })
+  .openapi("ThreadsAccount");
+
+const ThreadsConnectCallbackResponseSchema = z
+  .object({
+    account: ThreadsAccountSchema,
+    created: z.boolean().openapi({
+      description: "false when this Threads account was already connected to the brand: it was refreshed, not duplicated",
+    }),
+  })
+  .openapi("ThreadsConnectCallbackResponse");
+
+export const ThreadsAccountUpdateSchema = z
+  .object({ accountType: AccountTypeSchema })
+  .openapi("ThreadsAccountUpdate");
+
+export const ThreadsPublishSchema = z
+  .object({
+    text: z.string().min(1).max(500).openapi({ description: "Post text, at most 500 characters (Threads' limit)" }),
+    replyToPostId: z.string().min(1).optional().openapi({
+      description: "Publish as a reply under this Threads post id (e.g. the postId a previous call returned)",
+    }),
+    idempotencyKey: z.string().min(1).max(512).optional().openapi({
+      description:
+        "Caller's own key, unique per org. The same key again answers the publication it already made (200, `replayed: true`) and never calls Threads twice. The same key with another account, text or parent post is a 409 `idempotency_key_reused`.",
+    }),
+    outcomeKey: z.enum(["post_published", "threads_post_published"]).optional().openapi({
+      description:
+        "The outcome a MAIN post declares on the caller's run. Default `post_published` (what the live Threads script declares today). `threads_post_published` = the Threads-specific outcome (OUTCOME-FINEST-1106), the one every imported post declares: a script opts in by sending it. Kept on the publication; a replay answers the stored one.",
+    }),
+  })
+  .openapi("ThreadsPublish");
+
+const PublicationKindSchema = z.enum(["post", "reply"]).openapi({
+  description: "`post` = a main post (one `post_published` outcome); `reply` = a reply under a post (part of its thread, no outcome)",
+});
+
+const ThreadsPublishResponseSchema = z
+  .object({
+    accountId: z.string().uuid(),
+    postId: z.string().openapi({ description: "Threads media id of the published post" }),
+    permalink: z.string().nullable(),
+    replyToPostId: z.string().nullable(),
+    publicationId: z.string().uuid().openapi({ description: "This service's record of the publication (the outcome's subject)" }),
+    kind: PublicationKindSchema,
+    threadRootPostId: z.string().openapi({ description: "Threads id of the main post of this thread (itself for a post)" }),
+    publishedAt: z.string(),
+    replayed: z.boolean().openapi({ description: "true when the idempotency key had already published this: nothing was published again" }),
+    outcome: z
+      .object({
+        outcomeKey: z.enum(["post_published", "threads_post_published"]),
+        declared: z.boolean().openapi({ description: "false = runs-service refused or was unreachable; retried by the next call with the same idempotency key" }),
+        error: z.string().nullable(),
+      })
+      .nullable()
+      .openapi({ description: "The outcome (`post_published` by default, `threads_post_published` when asked) declared on the caller's run (x-run-id), main posts only; null for a reply" }),
+  })
+  .openapi("ThreadsPublishResponse");
+
+export const ThreadsPublicationsQuerySchema = z
+  .object({
+    campaignId: z.string().min(1).optional().openapi({ description: "Publications made under this campaign (x-campaign-id at publish time)" }),
+    brandId: z.string().min(1).optional().openapi({ description: "Publications on this brand's accounts" }),
+    since: z.coerce.date().optional().openapi({ description: "ISO date-time, inclusive. Default: 30 days ago" }),
+    until: z.coerce.date().optional().openapi({ description: "ISO date-time, inclusive. Default: now" }),
+    limit: z.coerce.number().int().min(1).max(1000).default(200),
+  })
+  .refine((q) => q.campaignId || q.brandId, {
+    message: "campaignId or brandId is required",
+    path: ["campaignId"],
+  });
+
+export const MeasurablePostsQuerySchema = z.object({
+  since: z.coerce.date().optional().openapi({ description: "ISO date-time, inclusive. Default: 90 days ago" }),
+  afterPublishedAt: z.coerce.date().optional().openapi({ description: "Keyset cursor: the last row's publishedAt (with afterId)" }),
+  afterId: z.string().uuid().optional().openapi({ description: "Keyset cursor: the last row's id (with afterPublishedAt)" }),
+  limit: z.coerce.number().int().min(1).max(1000).default(500),
+}).refine((q) => (q.afterPublishedAt === undefined) === (q.afterId === undefined), {
+  message: "afterPublishedAt and afterId go together",
+  path: ["afterId"],
+});
+
+const ThreadsPublicationSchema = z
+  .object({
+    id: z.string().uuid(),
+    accountId: z.string().uuid(),
+    accountUsername: z.string(),
+    accountType: AccountTypeSchema,
+    brandId: z.string(),
+    campaignId: z.string().nullable(),
+    runId: z.string(),
+    userId: z.string(),
+    kind: PublicationKindSchema,
+    replyToPostId: z.string().nullable(),
+    threadRootPostId: z.string().nullable(),
+    postId: z.string(),
+    permalink: z.string().nullable(),
+    text: z.string().openapi({ description: "The writer's words, as asked" }),
+    publishedText: z.string().openapi({ description: "What Threads received: text with the post's dy_post on every link to the brand's own site" }),
+    linkTracking: z.string().nullable().openapi({ description: "tracked:<links> | no_own_link | brand_unreadable | too_long | root_unknown (null before 2026-10-29, and on an imported post)" }),
+    origin: z.enum(["published", "imported"]).openapi({ description: "published = this service published it; imported = read off the connected account (published outside us, hand posts included)" }),
+    performedBy: z.enum(["ours", "client_team"]).openapi({ description: "Who performed it: ours, or the client's own team (an imported post)" }),
+    outcomeKey: z.string().openapi({ description: "The outcome this main post declares: post_published | threads_post_published (every imported post)" }),
+    mediaType: z.string().nullable().openapi({ description: "Threads media_type of an imported post (TEXT_POST, IMAGE, VIDEO, CAROUSEL_ALBUM, AUDIO); null on a post we published (text)" }),
+    publishedAt: z.string(),
+  })
+  .openapi("ThreadsPublication");
+
+const threadsErrors = {
+  400: {
+    description: "The request cannot be satisfied as written (names the field or the reason)",
+    content: { "application/json": { schema: ErrorResponseSchema } },
+  },
+  502: {
+    description:
+      "Threads refused the call (carries Threads' code and message), or our Threads app credentials are not configured (names the key)",
+    content: { "application/json": { schema: ErrorResponseSchema } },
+  },
+};
+
+const notFound = {
+  404: {
+    description: "No such Threads account in this org",
+    content: { "application/json": { schema: ErrorResponseSchema } },
+  },
+};
+
+registry.registerPath({
+  method: "post",
+  path: "/orgs/threads/auth/start",
+  summary: "Start connecting a Threads account to a brand: returns the Threads login URL",
+  security: [{ serviceKeyAuth: [] }],
+  request: {
+    headers: IdentityHeadersSchema,
+    body: { content: { "application/json": { schema: ThreadsConnectStartSchema } } },
+  },
+  responses: {
+    200: {
+      description: "Threads login URL",
+      content: { "application/json": { schema: ThreadsConnectStartResponseSchema } },
+    },
+    ...threadsErrors,
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/orgs/threads/auth/callback",
+  summary:
+    "Finish a Threads login: stores the account (or refreshes it when already connected to the brand)",
+  security: [{ serviceKeyAuth: [] }],
+  request: {
+    headers: IdentityHeadersSchema,
+    body: { content: { "application/json": { schema: ThreadsConnectCallbackSchema } } },
+  },
+  responses: {
+    200: {
+      description: "Connected account",
+      content: { "application/json": { schema: ThreadsConnectCallbackResponseSchema } },
+    },
+    ...threadsErrors,
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/orgs/threads/accounts",
+  summary: "List the connected Threads accounts of the org, or of one brand",
+  security: [{ serviceKeyAuth: [] }],
+  request: {
+    headers: IdentityHeadersSchema,
+    query: z.object({ brandId: z.string().optional() }),
+  },
+  responses: {
+    200: {
+      description: "Connected Threads accounts, oldest first",
+      content: {
+        "application/json": {
+          schema: z.object({ accounts: z.array(ThreadsAccountSchema) }).openapi("ThreadsAccountList"),
+        },
+      },
+    },
+  },
+});
+
+registry.registerPath({
+  method: "patch",
+  path: "/orgs/threads/accounts/{id}",
+  summary: "Change a connected Threads account's type",
+  security: [{ serviceKeyAuth: [] }],
+  request: {
+    headers: IdentityHeadersSchema,
+    params: z.object({ id: z.string().uuid() }),
+    body: { content: { "application/json": { schema: ThreadsAccountUpdateSchema } } },
+  },
+  responses: {
+    200: {
+      description: "Updated account",
+      content: { "application/json": { schema: z.object({ account: ThreadsAccountSchema }) } },
+    },
+    ...notFound,
+    400: threadsErrors[400],
+  },
+});
+
+registry.registerPath({
+  method: "delete",
+  path: "/orgs/threads/accounts/{id}",
+  summary: "Disconnect a Threads account",
+  security: [{ serviceKeyAuth: [] }],
+  request: {
+    headers: IdentityHeadersSchema,
+    params: z.object({ id: z.string().uuid() }),
+  },
+  responses: {
+    200: {
+      description: "Disconnected",
+      content: { "application/json": { schema: MessageResponseSchema } },
+    },
+    ...notFound,
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/orgs/threads/accounts/{id}/posts",
+  summary: "Publish a text post, or a reply under a post, on a connected Threads account (kept on record, idempotent on the caller's key)",
+  description:
+    "Every publication is kept (account, brand, org, user, run, campaign, kind, parent post, text, permalink, time). A main post declares ONE `post_published` outcome on the caller's run (x-run-id), subject = the publication; a reply declares none. The Threads API is free: no cost.",
+  security: [{ serviceKeyAuth: [] }],
+  request: {
+    headers: ThreadsPublishHeadersSchema,
+    params: z.object({ id: z.string().uuid() }),
+    body: { content: { "application/json": { schema: ThreadsPublishSchema } } },
+  },
+  responses: {
+    201: {
+      description: "Published",
+      content: { "application/json": { schema: ThreadsPublishResponseSchema } },
+    },
+    200: {
+      description: "Already published with this idempotency key: the same publication, nothing published again",
+      content: { "application/json": { schema: ThreadsPublishResponseSchema } },
+    },
+    ...notFound,
+    409: {
+      description:
+        "`reason: needs_reconnect` (+ `accountId`): Threads no longer accepts the account's login. `reason: idempotency_key_reused` / `publish_in_progress` (+ `publicationId`): the key names another publication, or its publish is still in flight.",
+      content: { "application/json": { schema: ErrorResponseSchema } },
+    },
+    ...threadsErrors,
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/orgs/threads/publications",
+  summary: "List the Threads publications of one campaign and/or one brand over a time window, newest first",
+  security: [{ serviceKeyAuth: [] }],
+  request: {
+    headers: IdentityHeadersSchema,
+    query: z.object({
+      campaignId: z.string().optional().openapi({ description: "At least one of campaignId, brandId" }),
+      brandId: z.string().optional(),
+      since: z.string().optional().openapi({ description: "ISO date-time, inclusive. Default: 30 days ago" }),
+      until: z.string().optional().openapi({ description: "ISO date-time, inclusive. Default: now" }),
+      limit: z.string().optional().openapi({ description: "1 to 1000, default 200" }),
+    }),
+  },
+  responses: {
+    200: {
+      description: "Publications (posts and replies) of the org matching the filters, newest first",
+      content: {
+        "application/json": {
+          schema: z.object({ publications: z.array(ThreadsPublicationSchema) }).openapi("ThreadsPublicationList"),
+        },
+      },
+    },
+    400: threadsErrors[400],
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/internal/threads/measurable-posts",
+  summary:
+    "Fleet-wide Threads MAIN posts whose outcome landed on runs-service, oldest first (keyset paged): posts we published (outcome post_published or threads_post_published) AND posts imported from a connected account (threads_post_published, performedBy client_team). What social-service measures (views, engagement) and declares outcomes on (FACTORY-P2-CONTENT-OUTCOMES). A reader consuming the post's outcome consumes `outcomeKey`.",
+  security: [{ serviceKeyAuth: [] }],
+  request: {
+    query: z.object({
+      since: z.string().optional().openapi({ description: "ISO date-time, inclusive. Default: 90 days ago" }),
+      afterPublishedAt: z.string().optional().openapi({ description: "Keyset cursor (with afterId): the last row's publishedAt" }),
+      afterId: z.string().optional().openapi({ description: "Keyset cursor (with afterPublishedAt): the last row's id" }),
+      limit: z.string().optional().openapi({ description: "1 to 1000, default 500" }),
+    }),
+  },
+  responses: {
+    200: {
+      description: "Main posts with the org that owns them and when their post_published was declared",
+      content: {
+        "application/json": {
+          schema: z
+            .object({
+              posts: z.array(
+                ThreadsPublicationSchema.extend({
+                  orgId: z.string(),
+                  outcomeDeclaredAt: z.string().openapi({ description: "When the post's outcome (`outcomeKey`) landed on runs-service" }),
+                  outcomeRunId: z.string().openapi({ description: "The run that outcome is declared on: runId for a post we published, the post's own unit run (child of runId) for an imported one" }),
+                }),
+              ),
+            })
+            .openapi("ThreadsMeasurablePostList"),
+        },
+      },
+    },
+    400: threadsErrors[400],
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/internal/threads/publications/{id}/insights",
+  summary:
+    "Live lifetime insights of one Threads MAIN post (views, likes, replies, reposts, quotes, shares), read on the account that published it. Free, stores nothing: social-service keeps the series and declares post_viewed / post_engaged (FACTORY-P2-CONTENT-OUTCOMES).",
+  security: [{ serviceKeyAuth: [] }],
+  request: { params: z.object({ id: z.string().uuid().openapi({ description: "Publication id (GET /internal/threads/measurable-posts)" }) }) },
+  responses: {
+    200: {
+      description: "The post's insights; a metric Threads did not return is null, never 0",
+      content: {
+        "application/json": {
+          schema: z
+            .object({
+              publicationId: z.string().uuid(),
+              postId: z.string(),
+              permalink: z.string().nullable(),
+              observedAt: z.string(),
+              metrics: z.object({
+                views: z.number().nullable(),
+                likes: z.number().nullable(),
+                replies: z.number().nullable(),
+                reposts: z.number().nullable(),
+                quotes: z.number().nullable(),
+                shares: z.number().nullable(),
+              }),
+              raw: z.unknown().openapi({ description: "Threads' answer verbatim (bronze for the caller)" }),
+            })
+            .openapi("ThreadsPostInsights"),
+        },
+      },
+    },
+    400: { description: "Invalid publication id", content: { "application/json": { schema: ErrorResponseSchema } } },
+    404: { description: "No such publication", content: { "application/json": { schema: ErrorResponseSchema } } },
+    409: {
+      description:
+        "Not readable now, `reason`: `needs_reconnect` (Threads no longer accepts the login), `insights_scope_missing` (connected without threads_manage_insights), `insights_permission_missing` (our Meta app lacks the permission: Threads code 10), `not_measurable` (a reply, unpublished, or the account is gone)",
+      content: { "application/json": { schema: ErrorResponseSchema } },
+    },
+    502: { description: "Threads refused the read (its code and message)", content: { "application/json": { schema: ErrorResponseSchema } } },
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/internal/threads/import",
+  summary:
+    "Run the Threads post import now (the same work its cron does): every connected account's own posts not on record land as publications (origin imported, performedBy client_team), each declaring threads_post_published dated at its Threads time, on runs of the CONNECTING org.",
+  security: [{ serviceKeyAuth: [] }],
+  responses: {
+    200: { description: "Import summary: accounts read, posts imported, outcomes declared, errors" },
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/internal/threads/token-refresh",
+  summary:
+    "Run the Threads token refresh now. The same work its cron does twice a day: refreshes tokens nearing expiry, marks dead ones needs_reconnect.",
+  security: [{ serviceKeyAuth: [] }],
+  responses: {
+    200: { description: "Token refresh summary" },
   },
 });

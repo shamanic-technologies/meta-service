@@ -9,6 +9,22 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # The Threads account tests run against a real Postgres: one row per
+    # connected account is the database's unique key, which a mock cannot prove.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       # The runner has no pnpm, and this repo pins one in package.json. Without
