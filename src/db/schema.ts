@@ -7,9 +7,10 @@ import {
   integer,
   index,
   unique,
+  uniqueIndex,
   jsonb,
 } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 
 // ==================== meta_connections ====================
 
@@ -311,6 +312,9 @@ export const threadsAccounts = pgTable(
     // connected | needs_reconnect — set by whoever observed the token die.
     status: text("status").notNull().default("connected"),
     statusReason: text("status_reason"),
+    // When the post import last walked the account's timeline to its end (src/lib/threads-import.ts):
+    // null = never, so the next pass reads every page; afterwards a pass stops at the first known page.
+    postsImportedAt: timestamp("posts_imported_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -395,7 +399,20 @@ export const threadsPublications = pgTable(
     publishedText: text("published_text"),
     // tracked:<n links> | no_own_link | brand_unreadable | too_long
     linkTracking: text("link_tracking"),
-    // When the `post_published` outcome landed on runs-service (main posts only).
+    // published = this service published it | imported = read off the connected account (a post
+    // published outside us, hand posts included: src/lib/threads-import.ts).
+    origin: text("origin").notNull().default("published"),
+    // Who performed it: ours | client_team (an imported post we did not publish).
+    performedBy: text("performed_by").notNull().default("ours"),
+    // The outcome a MAIN post declares: post_published (the default of the publish route, what the
+    // live Threads script reads) | threads_post_published (imported posts, and a caller that opts in).
+    outcomeKey: text("outcome_key").notNull().default("post_published"),
+    // The run the outcome is declared on when it is not `run_id` (an imported post: its own unit run,
+    // child of the import run, dated at the post's own time).
+    outcomeRunId: text("outcome_run_id"),
+    // Threads' media_type for an imported post (TEXT_POST, IMAGE, VIDEO, CAROUSEL_ALBUM, AUDIO).
+    mediaType: text("media_type"),
+    // When the post's outcome landed on runs-service (main posts only).
     outcomeDeclaredAt: timestamp("outcome_declared_at", { withTimezone: true }),
     publishedAt: timestamp("published_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -418,6 +435,10 @@ export const threadsPublications = pgTable(
       table.publishedAt,
     ),
     index("idx_threads_publications_post").on(table.orgId, table.threadsPostId),
+    uniqueIndex("uq_threads_publications_account_post")
+      .on(table.accountId, table.threadsPostId)
+      // Imported posts only: one import per post per account (a post we published is matched in code).
+      .where(sql`${table.origin} = 'imported'`),
   ],
 );
 

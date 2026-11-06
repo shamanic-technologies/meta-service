@@ -25,6 +25,7 @@ const { db, sql } = await import("../../src/db/index.js");
 const { threadsAccounts, threadsOauthPending, threadsPublications } = await import("../../src/db/schema.js");
 const { encrypt, decrypt } = await import("../../src/lib/crypto.js");
 const { runTokenRefresh } = await import("../../src/lib/threads-accounts.js");
+const { runThreadsImport } = await import("../../src/lib/threads-import.js");
 const { resetBrandDomainCache } = await import("../../src/lib/services.js");
 const { createTestApp, getAuthHeaders } = await import("../helpers/test-app.js");
 
@@ -43,6 +44,9 @@ const calls: Array<{ url: URL; body: URLSearchParams | null }> = [];
 /** runs-service calls (RUNS_SERVICE_URL = http://localhost:9999 in tests/setup.ts). */
 const runsCalls: Array<{ url: URL; headers: Headers; body: any }> = [];
 let runsStatus = 201;
+/** Runs opened (POST /v1/runs) and closed (PATCH /v1/runs/:id): same idempotency key = same run. */
+const runCreates: Array<{ id: string; body: any; idempotencyKey: string | null }> = [];
+const runCloses: Array<{ id: string; body: any }> = [];
 let threadsDelayMs = 0;
 let brandCalls = 0;
 let brandStatus = 200;
@@ -92,6 +96,18 @@ beforeAll(async () => {
   await migrate(db, { migrationsFolder: "./drizzle" });
   vi.stubGlobal("fetch", async (input: string | URL, init?: RequestInit) => {
     const url = new URL(String(input));
+    if (url.host === "localhost:9999" && url.pathname === "/v1/runs" && init?.method === "POST") {
+      const headers = new Headers(init?.headers);
+      const idempotencyKey = headers.get("idempotency-key");
+      const prior = idempotencyKey ? runCreates.find((r) => r.idempotencyKey === idempotencyKey) : undefined;
+      const id = prior?.id ?? crypto.randomUUID();
+      runCreates.push({ id, body: JSON.parse(String(init?.body)), idempotencyKey });
+      return new Response(JSON.stringify({ id }), { status: 201, headers: { "content-type": "application/json" } });
+    }
+    if (url.host === "localhost:9999" && /^\/v1\/runs\/[^/]+$/.test(url.pathname) && init?.method === "PATCH") {
+      runCloses.push({ id: url.pathname.split("/").pop()!, body: JSON.parse(String(init?.body)) });
+      return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    }
     if (url.host === "localhost:9999" && url.pathname.startsWith("/v1/runs/")) {
       runsCalls.push({ url, headers: new Headers(init?.headers), body: JSON.parse(String(init?.body)) });
       return new Response(JSON.stringify({ recordedCount: 1 }), { status: runsStatus, headers: { "content-type": "application/json" } });
@@ -125,6 +141,8 @@ beforeEach(async () => {
   calls.length = 0;
   runsCalls.length = 0;
   runsStatus = 201;
+  runCreates.length = 0;
+  runCloses.length = 0;
   threadsDelayMs = 0;
   brandStatus = 200;
   resetBrandDomainCache();
@@ -766,5 +784,177 @@ describe("Threads token refresh", () => {
     const [deadRow] = await db.select().from(threadsAccounts).where(eq(threadsAccounts.id, due.id));
     expect(deadRow.status).toBe("needs_reconnect");
     expect(deadRow.statusReason).toContain("Session has expired");
+  });
+});
+
+describe("Threads-specific outcome + post import (OUTCOME-FINEST-1106)", () => {
+  const key = { "x-api-key": "test-service-key" };
+  const outcomeCalls = () => runsCalls.filter((c) => c.url.pathname.endsWith("/outcomes"));
+
+  /** The account's timeline: GET /{user}/threads, two pages; every other call as the default mock. */
+  function timeline(pages: Array<Array<{ id: string; text?: string; timestamp: string; media_type?: string }>>): Handler {
+    const base = defaultThreads();
+    return (url, init) => {
+      if (/^\/v1\.0\/\d+\/threads$/.test(url.pathname) && (init?.method ?? "GET") === "GET") {
+        const at = Number(url.searchParams.get("after") ?? 0);
+        const data = (pages[at] ?? []).map((p) => ({ media_type: "TEXT_POST", permalink: `https://www.threads.net/@alice_ai/post/${p.id}`, ...p }));
+        const more = at + 1 < pages.length;
+        return { body: { data, paging: { cursors: { after: String(at + 1) }, ...(more ? { next: "https://graph.threads.net/next" } : {}) } } };
+      }
+      return base(url, init);
+    };
+  }
+
+  it("a publication that opts in declares threads_post_published; the default stays post_published", async () => {
+    const { body } = await connect("code-alice");
+    const runId = "77777777-7777-7777-7777-777777777777";
+    const opted = await request(app)
+      .post(`/orgs/threads/accounts/${body.account.id}/posts`)
+      .set({ ...getAuthHeaders(), "x-run-id": runId })
+      .send({ text: "Finest", outcomeKey: "threads_post_published" });
+    expect(opted.status).toBe(201);
+    expect(opted.body.outcome).toEqual({ outcomeKey: "threads_post_published", declared: true, error: null });
+    expect(outcomeCalls()[0].url.pathname).toBe(`/v1/runs/${runId}/outcomes`);
+    expect(outcomeCalls()[0].body.produced).toEqual([
+      { outcomeKey: "threads_post_published", subjectService: "meta-service", subjectId: opted.body.publicationId },
+    ]);
+    const [row] = await db.select().from(threadsPublications).where(eq(threadsPublications.id, opted.body.publicationId));
+    expect(row).toMatchObject({ outcomeKey: "threads_post_published", origin: "published", performedBy: "ours" });
+
+    const bad = await request(app)
+      .post(`/orgs/threads/accounts/${body.account.id}/posts`)
+      .set(getAuthHeaders())
+      .send({ text: "Coarse family", outcomeKey: "x_post_published" });
+    expect(bad.status).toBe(400);
+  });
+
+  it("imports every own post not on record as client_team threads_post_published, on runs of the CONNECTING org", async () => {
+    const { body } = await connect("code-alice");
+    // One post we published (on record), then the account's timeline: ours, a hand post, a repost, an older hand post.
+    const ours = await request(app)
+      .post(`/orgs/threads/accounts/${body.account.id}/posts`)
+      .set({ ...getAuthHeaders(), "x-run-id": "88888888-8888-8888-8888-888888888888" })
+      .send({ text: "Ours" });
+    expect(ours.body.postId).toBe("post-root");
+    runsCalls.length = 0;
+    threadsHandler = timeline([
+      [
+        { id: "post-root", text: "Ours", timestamp: "2026-11-05T10:00:00+0000" },
+        { id: "hand-1", text: "Written by hand", timestamp: "2026-11-04T09:00:00+0000" },
+        { id: "repost-1", timestamp: "2026-11-03T09:00:00+0000", media_type: "REPOST_FACADE" },
+      ],
+      [{ id: "hand-2", timestamp: "2026-10-01T08:00:00+0000", media_type: "IMAGE" }],
+    ]);
+
+    const summary = await runThreadsImport(new Date());
+    expect(summary).toMatchObject({ accountsRead: 1, postsImported: 2, outcomesDeclared: 2, errors: [] });
+
+    const imported = await db.select().from(threadsPublications).where(eq(threadsPublications.origin, "imported"));
+    expect(imported.map((r) => r.threadsPostId).sort()).toEqual(["hand-1", "hand-2"]);
+    for (const r of imported) {
+      expect(r).toMatchObject({ performedBy: "client_team", outcomeKey: "threads_post_published", kind: "post", status: "published", orgId: "test-org-id", brandId: BRAND });
+      expect(r.outcomeDeclaredAt).not.toBeNull();
+    }
+    const hand1 = imported.find((r) => r.threadsPostId === "hand-1")!;
+    expect(hand1.text).toBe("Written by hand");
+    expect(hand1.publishedAt!.toISOString()).toBe("2026-11-04T09:00:00.000Z");
+
+    // The import run: the CONNECTING org's identity, read off the account row; never ours.
+    const importRun = runCreates.find((r) => r.body.taskName === "threads-post-import")!;
+    expect(importRun.body).toMatchObject({ orgId: "test-org-id", userId: "test-user-id", brandId: BRAND, serviceName: "meta-service" });
+    expect(hand1.runId).toBe(importRun.id);
+    // Each post: its own unit run, child of the import run, same org.
+    const units = runCreates.filter((r) => r.body.taskName === "threads-post-imported");
+    expect(units).toHaveLength(2);
+    for (const u of units) expect(u.body).toMatchObject({ orgId: "test-org-id", parentRunId: importRun.id });
+    expect(hand1.outcomeRunId).toBe(units.find((u) => u.idempotencyKey === `threads-import:${hand1.id}`)!.id);
+
+    // The declaration: on the unit run, dated at the post's time, performer client_team, org header.
+    const decl = outcomeCalls().find((c) => c.url.pathname === `/v1/runs/${hand1.outcomeRunId}/outcomes`)!;
+    expect(decl.headers.get("x-org-id")).toBe("test-org-id");
+    expect(decl.headers.get("x-service-name")).toBe("meta-service");
+    expect(decl.body).toEqual({
+      produced: [
+        { outcomeKey: "threads_post_published", subjectService: "meta-service", subjectId: hand1.id, performer: { kind: "client_team", name: "threads" } },
+      ],
+      occurredAt: "2026-11-04T09:00:00.000Z",
+    });
+    // Our own post kept its post_published and was not imported again.
+    const [mine] = await db.select().from(threadsPublications).where(eq(threadsPublications.threadsPostId, "post-root"));
+    expect(mine).toMatchObject({ origin: "published", outcomeKey: "post_published", performedBy: "ours" });
+    expect(runCloses.find((c) => c.id === importRun.id)!.body.status).toBe("completed");
+
+    // A second pass imports nothing new and stops at the first known page.
+    const again = await runThreadsImport(new Date());
+    expect(again).toMatchObject({ postsImported: 0, outcomesDeclared: 0 });
+    expect(calls.filter((c) => c.url.searchParams.get("after") === "1")).toHaveLength(1);
+
+    // social-service reads the imported posts like ours, with the outcome to consume.
+    const measurable = await request(app).get("/internal/threads/measurable-posts").set(key);
+    const m = measurable.body.posts.find((p: any) => p.id === hand1.id);
+    expect(m).toMatchObject({ origin: "imported", performedBy: "client_team", outcomeKey: "threads_post_published", orgId: "test-org-id", runId: importRun.id, outcomeRunId: hand1.outcomeRunId });
+  });
+
+  it("a refused declaration stays pending and is retried on the next pass, on the same unit run", async () => {
+    await connect("code-alice");
+    threadsHandler = timeline([[{ id: "hand-9", text: "Hand", timestamp: "2026-11-01T09:00:00+0000" }]]);
+    runsStatus = 422;
+    const first = await runThreadsImport(new Date());
+    expect(first).toMatchObject({ postsImported: 1, outcomesDeclared: 0 });
+    expect(first.errors).toHaveLength(1);
+    const [row] = await db.select().from(threadsPublications).where(eq(threadsPublications.threadsPostId, "hand-9"));
+    expect(row.outcomeDeclaredAt).toBeNull();
+
+    runsStatus = 201;
+    const second = await runThreadsImport(new Date());
+    expect(second).toMatchObject({ postsImported: 0, outcomesDeclared: 1 });
+    const units = runCreates.filter((r) => r.idempotencyKey === `threads-import:${row.id}`);
+    expect(new Set(units.map((u) => u.id)).size).toBe(1);
+  });
+
+  it("a dead token flips the account to needs_reconnect; the import run is closed failed", async () => {
+    const { body } = await connect("code-alice");
+    const base = defaultThreads();
+    threadsHandler = (url, init) =>
+      /^\/v1\.0\/\d+\/threads$/.test(url.pathname) && (init?.method ?? "GET") === "GET"
+        ? { status: 400, body: { error: { message: "Session has expired", code: 190 } } }
+        : base(url, init);
+    const summary = await runThreadsImport(new Date());
+    expect(summary).toMatchObject({ accountsSkipped: 1, postsImported: 0 });
+    const [row] = await db.select().from(threadsAccounts).where(eq(threadsAccounts.id, body.account.id));
+    expect(row.status).toBe("needs_reconnect");
+    const importRun = runCreates.find((r) => r.body.taskName === "threads-post-import")!;
+    expect(runCloses.find((c) => c.id === importRun.id)!.body.status).toBe("failed");
+  });
+
+  it("an insights read runs on a run of the account's org, child of the post's run", async () => {
+    const { body } = await connect("code-alice");
+    await db.update(threadsAccounts).set({ scopes: ["threads_basic", "threads_manage_insights"] }).where(eq(threadsAccounts.id, body.account.id));
+    const runId = "99999999-9999-9999-9999-999999999999";
+    const main = await request(app)
+      .post(`/orgs/threads/accounts/${body.account.id}/posts`)
+      .set({ ...getAuthHeaders(), "x-run-id": runId })
+      .send({ text: "Main" });
+    const base = defaultThreads();
+    threadsHandler = (url, init) =>
+      url.pathname.endsWith("/insights") ? { body: { data: [{ name: "views", values: [{ value: 5 }] }] } } : base(url, init);
+    const res = await request(app).get(`/internal/threads/publications/${main.body.publicationId}/insights`).set(key);
+    expect(res.status).toBe(200);
+    const read = runCreates.find((r) => r.body.taskName === "threads-insights-read")!;
+    expect(read.body).toMatchObject({ orgId: "test-org-id", userId: "test-user-id", brandId: BRAND, parentRunId: runId });
+    expect(runCloses.find((c) => c.id === read.id)!.body.status).toBe("completed");
+  });
+
+  it("a token refresh runs on a run of the account's org", async () => {
+    const { body } = await connect("code-alice");
+    const old = new Date(Date.now() - 40 * 86_400_000);
+    await db
+      .update(threadsAccounts)
+      .set({ tokenIssuedAt: old, tokenExpiresAt: new Date(Date.now() + 10 * 86_400_000) })
+      .where(eq(threadsAccounts.id, body.account.id));
+    const summary = await runTokenRefresh(new Date());
+    expect(summary.refreshed).toBe(1);
+    const run = runCreates.find((r) => r.body.taskName === "threads-token-refresh")!;
+    expect(run.body).toMatchObject({ orgId: "test-org-id", userId: "test-user-id", brandId: BRAND });
   });
 });

@@ -12,6 +12,7 @@ import { Router } from "express";
 import { runReviewSync } from "../services/review-sync.js";
 import { runSpendIngest } from "../services/spend-ingest.js";
 import { runTokenRefresh } from "../lib/threads-accounts.js";
+import { runThreadsImport } from "../lib/threads-import.js";
 import { listMeasurablePosts, PublicationNotMeasurableError, publicationInsights, serialisePublication } from "../lib/threads-publications.js";
 import { MeasurablePostsQuerySchema } from "../schemas.js";
 
@@ -34,6 +35,15 @@ router.post("/internal/spend-sync", async (req, res, next) => {
       return;
     }
     res.json(await runSpendIngest({ lookbackDays }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** The Threads post import, now (its cron runs it every 6 h): src/lib/threads-import.ts. */
+router.post("/internal/threads/import", async (_req, res, next) => {
+  try {
+    res.json(await runThreadsImport());
   } catch (err) {
     next(err);
   }
@@ -70,6 +80,7 @@ router.get("/internal/threads/measurable-posts", async (req, res, next) => {
         ...serialisePublication(r),
         orgId: r.orgId,
         outcomeDeclaredAt: r.outcomeDeclaredAt!.toISOString(),
+        outcomeRunId: r.outcomeRunId ?? r.runId,
       })),
     });
   } catch (err) {

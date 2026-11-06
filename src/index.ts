@@ -23,6 +23,7 @@ import {
   startReviewSync,
   startSpendSync,
   startThreadsTokenRefresh,
+  startThreadsImport,
 } from "./services/crons.js";
 import { serviceKeyAuth } from "./middleware/auth.js";
 import { requireIdentity } from "./middleware/identity.js";
@@ -140,6 +141,7 @@ if (process.env.NODE_ENV !== "test") {
         startReviewSync();
         startSpendSync();
         startThreadsTokenRefresh();
+        startThreadsImport();
       });
     })
     .catch((err) => {

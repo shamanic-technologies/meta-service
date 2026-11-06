@@ -29,6 +29,13 @@
       "when": 1793300000000,
       "tag": "0003_threads_link_tracking",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793985742000,
+      "tag": "0004_threads_post_outcomes",
+      "breakpoints": true
     }
   ]
 }

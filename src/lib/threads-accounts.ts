@@ -17,6 +17,7 @@ import {
 import { ACCOUNT_TYPES, type AccountType } from "./account-types.js";
 import { decrypt, encrypt } from "./crypto.js";
 import { getPlatformKey, type CallerContext } from "./key-service.js";
+import { onAccountRun } from "./threads-runs.js";
 import {
   buildAuthorizeUrl,
   exchangeCode,
@@ -286,14 +287,14 @@ export async function deleteAccount(id: string, orgId: string): Promise<boolean>
   return rows.length > 0;
 }
 
-async function markNeedsReconnect(id: string, reason: string): Promise<void> {
+export async function markNeedsReconnect(id: string, reason: string): Promise<void> {
   await db
     .update(threadsAccounts)
     .set({ status: "needs_reconnect", statusReason: reason, updatedAt: new Date() })
     .where(eq(threadsAccounts.id, id));
 }
 
-function deadTokenReason(err: ThreadsApiError): string {
+export function deadTokenReason(err: ThreadsApiError): string {
   return `Threads no longer accepts this login (${err.threadsError?.message ?? "token refused"}). Reconnect the account.`;
 }
 
@@ -347,10 +348,14 @@ export class ThreadsInsightsUnavailableError extends Error {
   }
 }
 
-/** One post's lifetime insights on the account that published it, read live (free). */
+/**
+ * One post's lifetime insights on the account that published it, read live (free), on a run of
+ * the account's org (child of the run that published / imported the post): never ours.
+ */
 export async function readPostInsights(params: {
   account: ThreadsAccount;
   postId: string;
+  parentRunId?: string;
 }): Promise<{ insights: PostInsights; raw: unknown }> {
   const { account } = params;
   const { health, healthReason } = healthOf(account);
@@ -365,7 +370,12 @@ export async function readPostInsights(params: {
     );
   }
   try {
-    return await getPostInsights(decrypt(account.accessToken), params.postId);
+    return await onAccountRun(
+      account,
+      "threads-insights-read",
+      () => getPostInsights(decrypt(account.accessToken), params.postId),
+      { parentRunId: params.parentRunId },
+    );
   } catch (err) {
     if (err instanceof ThreadsApiError && err.tokenInvalid) {
       const reason = deadTokenReason(err);
@@ -437,7 +447,10 @@ export async function runTokenRefresh(now = new Date()): Promise<TokenRefreshSum
       continue;
     }
     try {
-      const fresh = await refreshLongLivedToken(decrypt(account.accessToken));
+      // On a run of the account's org (identity from the row): the refresh is that org's work.
+      const fresh = await onAccountRun(account, "threads-token-refresh", () =>
+        refreshLongLivedToken(decrypt(account.accessToken)),
+      );
       await db
         .update(threadsAccounts)
         .set({

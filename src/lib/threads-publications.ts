@@ -25,6 +25,15 @@ import { publishPost, readPostInsights } from "./threads-accounts.js";
 import type { PostInsights } from "./threads-client.js";
 
 export const POST_PUBLISHED = "post_published";
+/**
+ * The Threads-specific outcome (OUTCOME-FINEST-1106: « le QUOI c'est l'outcome, toujours aussi fin
+ * que possible »): every imported post declares it; the publish route declares it when the caller
+ * opts in (`outcomeKey: "threads_post_published"`). Default stays `post_published` until the live
+ * Threads script upgrades onto it.
+ */
+export const THREADS_POST_PUBLISHED = "threads_post_published";
+export const PUBLISH_OUTCOME_KEYS = [POST_PUBLISHED, THREADS_POST_PUBLISHED] as const;
+export type PublishOutcomeKey = (typeof PUBLISH_OUTCOME_KEYS)[number];
 export const SUBJECT_SERVICE = "meta-service";
 
 export type PublicationKind = "post" | "reply";
@@ -85,24 +94,25 @@ async function findByKey(orgId: string, key: string) {
  */
 async function ensureOutcome(row: ThreadsPublication): Promise<OutcomeState | null> {
   if (row.kind !== "post") return null;
+  const outcomeKey = row.outcomeKey;
   if (row.outcomeDeclaredAt) {
-    return { outcomeKey: POST_PUBLISHED, declared: true, error: null };
+    return { outcomeKey, declared: true, error: null };
   }
   try {
     await declareRunOutcomes(row.runId, row.orgId, [
-      { outcomeKey: POST_PUBLISHED, subjectService: SUBJECT_SERVICE, subjectId: row.id },
+      { outcomeKey, subjectService: SUBJECT_SERVICE, subjectId: row.id },
     ]);
     await db
       .update(threadsPublications)
       .set({ outcomeDeclaredAt: new Date(), updatedAt: new Date() })
       .where(eq(threadsPublications.id, row.id));
-    return { outcomeKey: POST_PUBLISHED, declared: true, error: null };
+    return { outcomeKey, declared: true, error: null };
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     console.error(
-      `[meta-service] OUTCOME NOT DECLARED: ${POST_PUBLISHED} ${SUBJECT_SERVICE}/${row.id} on run ${row.runId} (org ${row.orgId}): ${error.slice(0, 300)}`,
+      `[meta-service] OUTCOME NOT DECLARED: ${outcomeKey} ${SUBJECT_SERVICE}/${row.id} on run ${row.runId} (org ${row.orgId}): ${error.slice(0, 300)}`,
     );
-    return { outcomeKey: POST_PUBLISHED, declared: false, error };
+    return { outcomeKey, declared: false, error };
   }
 }
 
@@ -184,6 +194,7 @@ export async function publishAndRecord(params: {
   text: string;
   replyToPostId?: string;
   idempotencyKey?: string;
+  outcomeKey?: PublishOutcomeKey;
 }): Promise<PublishResult> {
   const { account, identity, text } = params;
   const replyToPostId = params.replyToPostId ?? null;
@@ -213,6 +224,7 @@ export async function publishAndRecord(params: {
       text,
       status: "publishing",
       idempotencyKey: key,
+      outcomeKey: params.outcomeKey ?? POST_PUBLISHED,
     })
     .onConflictDoNothing()
     .returning();
@@ -356,7 +368,7 @@ export async function publicationInsights(id: string): Promise<{
     throw new PublicationNotMeasurableError(id, `The Threads account that published it (@${publication.accountUsername}) is no longer connected`);
   }
   const observedAt = new Date().toISOString();
-  const { insights, raw } = await readPostInsights({ account, postId: publication.threadsPostId });
+  const { insights, raw } = await readPostInsights({ account, postId: publication.threadsPostId, parentRunId: publication.runId });
   return { publication, observedAt, insights, raw };
 }
 
@@ -378,6 +390,10 @@ export function serialisePublication(row: ThreadsPublication) {
     text: row.text,
     publishedText: row.publishedText ?? row.text,
     linkTracking: row.linkTracking,
+    origin: row.origin as "published" | "imported",
+    performedBy: row.performedBy as "ours" | "client_team",
+    outcomeKey: row.outcomeKey,
+    mediaType: row.mediaType,
     publishedAt: row.publishedAt!.toISOString(),
   };
 }
