@@ -97,11 +97,16 @@ beforeAll(async () => {
   vi.stubGlobal("fetch", async (input: string | URL, init?: RequestInit) => {
     const url = new URL(String(input));
     if (url.host === "localhost:9999" && url.pathname === "/v1/runs" && init?.method === "POST") {
+      // runs-service's contract: identity in HEADERS (x-org-id required, else 400), the dedup key in the BODY.
       const headers = new Headers(init?.headers);
-      const idempotencyKey = headers.get("idempotency-key");
+      const orgId = headers.get("x-org-id");
+      if (!orgId) return new Response(JSON.stringify({ error: "x-org-id header is required and must be a valid UUID" }), { status: 400 });
+      const sent = JSON.parse(String(init?.body));
+      const idempotencyKey: string | null = sent.idempotencyKey ?? null;
       const prior = idempotencyKey ? runCreates.find((r) => r.idempotencyKey === idempotencyKey) : undefined;
       const id = prior?.id ?? crypto.randomUUID();
-      runCreates.push({ id, body: JSON.parse(String(init?.body)), idempotencyKey });
+      const identity = { orgId, userId: headers.get("x-user-id") ?? undefined, brandId: headers.get("x-brand-id") ?? undefined, parentRunId: headers.get("x-run-id") ?? undefined };
+      runCreates.push({ id, body: { ...sent, ...Object.fromEntries(Object.entries(identity).filter(([, v]) => v !== undefined)) }, idempotencyKey });
       return new Response(JSON.stringify({ id }), { status: 201, headers: { "content-type": "application/json" } });
     }
     if (url.host === "localhost:9999" && /^\/v1\/runs\/[^/]+$/.test(url.pathname) && init?.method === "PATCH") {

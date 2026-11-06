@@ -6,7 +6,7 @@ const RUNS_SERVICE_API_KEY = () => process.env.RUNS_SERVICE_API_KEY || "";
 
 async function runsRequest<T>(
   path: string,
-  options: { method?: string; body?: unknown; idempotencyKey?: string } = {},
+  options: { method?: string; body?: unknown; idempotencyKey?: string; headers?: Record<string, string> } = {},
 ): Promise<T> {
   const response = await fetch(`${RUNS_SERVICE_URL()}${path}`, {
     method: options.method || "GET",
@@ -16,6 +16,7 @@ async function runsRequest<T>(
       ...(options.idempotencyKey
         ? { "Idempotency-Key": options.idempotencyKey }
         : {}),
+      ...(options.headers ?? {}),
     },
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
@@ -38,10 +39,19 @@ export async function createRun(params: {
   campaignId?: string;
   featureSlug?: string;
 }, idempotencyKey?: string): Promise<{ id: string }> {
+  // runs-service POST /v1/runs reads the identity from HEADERS (x-org-id required, x-user-id, x-run-id = the parent,
+  // x-brand-id) and the dedup key from the BODY: sent in the body, every run open here 400'd
+  // ("x-org-id header is required"), so the Threads import, insights read and token refresh never ran (2026-11-06).
+  const headers: Record<string, string> = { "x-org-id": params.orgId };
+  if (params.userId) headers["x-user-id"] = params.userId;
+  if (params.parentRunId) headers["x-run-id"] = params.parentRunId;
+  if (params.brandId) headers["x-brand-id"] = params.brandId;
+  if (params.campaignId) headers["x-campaign-id"] = params.campaignId;
+  if (params.featureSlug) headers["x-feature-slug"] = params.featureSlug;
   return runsRequest("/v1/runs", {
     method: "POST",
-    body: params,
-    idempotencyKey,
+    headers,
+    body: { serviceName: params.serviceName, taskName: params.taskName, ...(idempotencyKey ? { idempotencyKey } : {}) },
   });
 }
 
