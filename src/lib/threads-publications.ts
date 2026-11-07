@@ -31,11 +31,6 @@ import type { PostInsights } from "./threads-client.js";
  */
 export const THREADS_POST_PUBLISHED = "threads_post_published";
 export const PUBLISH_OUTCOME_KEYS = [THREADS_POST_PUBLISHED] as const;
-/**
- * The coarse key retired fleet-wide (DELETE-POST-PUBLISHED-1107, owner 2026-11-07): a caller stating
- * it is refused 400 `outcome_retired`; every stored row holding it was relabelled (migration 0005).
- */
-export const RETIRED_OUTCOME_KEYS = ["post_published"] as const;
 export type PublishOutcomeKey = (typeof PUBLISH_OUTCOME_KEYS)[number];
 export const SUBJECT_SERVICE = "meta-service";
 
