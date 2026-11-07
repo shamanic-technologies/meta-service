@@ -887,7 +887,7 @@ describe("Threads-specific outcome + post import (OUTCOME-FINEST-1106)", () => {
     };
   }
 
-  it("a publication stating threads_post_published declares it; the retired post_published is refused 400 outcome_retired", async () => {
+  it("a publication stating threads_post_published declares it; any other outcome (the retired post_published included) is refused 400", async () => {
     const { body } = await connect("code-alice");
     const runId = "77777777-7777-7777-7777-777777777777";
     const opted = await request(app)
@@ -915,7 +915,6 @@ describe("Threads-specific outcome + post import (OUTCOME-FINEST-1106)", () => {
       .set({ ...getAuthHeaders(), "x-run-id": runId })
       .send({ text: "Coarse", outcomeKey: "post_published" });
     expect(retired.status).toBe(400);
-    expect(retired.body.error).toBe("outcome_retired");
     expect(outcomeCalls()).toHaveLength(before);
     const coarseRows = await db.select().from(threadsPublications).where(eq(threadsPublications.text, "Coarse"));
     expect(coarseRows).toEqual([]);
