@@ -1,12 +1,12 @@
 /**
  * Threads publications on record: every post and reply this service published,
- * idempotent on the caller's own key, and the `post_published` outcome a MAIN
- * post declares on the caller's run.
+ * idempotent on the caller's own key, and the `threads_post_published` outcome a
+ * MAIN post declares on the caller's run.
  *
  * - Same idempotency key (per org) = the same publication answered back, Threads
  *   never called again. The key is claimed by a `publishing` row BEFORE the
  *   Threads call, so two concurrent calls with one key publish once.
- * - A main post is ONE `post_published` occurrence (catalogue step, object;
+ * - A main post is ONE `threads_post_published` occurrence (catalogue step, object;
  *   subject = this row), declared on the caller's run (x-run-id). A reply is part
  *   of its thread and declares nothing. The Threads API is free: no cost.
  */
@@ -24,15 +24,18 @@ import { THREADS_TEXT_MAX } from "./threads-limits.js";
 import { publishPost, readPostInsights } from "./threads-accounts.js";
 import type { PostInsights } from "./threads-client.js";
 
-export const POST_PUBLISHED = "post_published";
 /**
- * The Threads-specific outcome (OUTCOME-FINEST-1106: « le QUOI c'est l'outcome, toujours aussi fin
- * que possible »): every imported post declares it; the publish route declares it when the caller
- * opts in (`outcomeKey: "threads_post_published"`). Default stays `post_published` until the live
- * Threads script upgrades onto it.
+ * The outcome of every Threads MAIN post (OUTCOME-FINEST-1106: « le QUOI c'est l'outcome, toujours
+ * aussi fin que possible »): published or imported. This service only publishes Threads posts, so a
+ * caller stating no outcome gets the post's own outcome.
  */
 export const THREADS_POST_PUBLISHED = "threads_post_published";
-export const PUBLISH_OUTCOME_KEYS = [POST_PUBLISHED, THREADS_POST_PUBLISHED] as const;
+export const PUBLISH_OUTCOME_KEYS = [THREADS_POST_PUBLISHED] as const;
+/**
+ * The coarse key retired fleet-wide (DELETE-POST-PUBLISHED-1107, owner 2026-11-07): a caller stating
+ * it is refused 400 `outcome_retired`; every stored row holding it was relabelled (migration 0005).
+ */
+export const RETIRED_OUTCOME_KEYS = ["post_published"] as const;
 export type PublishOutcomeKey = (typeof PUBLISH_OUTCOME_KEYS)[number];
 export const SUBJECT_SERVICE = "meta-service";
 
@@ -224,7 +227,7 @@ export async function publishAndRecord(params: {
       text,
       status: "publishing",
       idempotencyKey: key,
-      outcomeKey: params.outcomeKey ?? POST_PUBLISHED,
+      outcomeKey: params.outcomeKey ?? THREADS_POST_PUBLISHED,
     })
     .onConflictDoNothing()
     .returning();
@@ -235,7 +238,7 @@ export async function publishAndRecord(params: {
     return answerExisting(winner, account.id, text, replyToPostId);
   }
 
-  // The thread's root publication: a reply's links credit the MAIN post (the one post_published).
+  // The thread's root publication: a reply's links credit the MAIN post (the one threads_post_published).
   let parentRoot: string | null = null;
   if (replyToPostId) {
     const [parent] = await db
@@ -310,9 +313,9 @@ export async function listPublications(params: {
 }
 
 /**
- * FLEET-WIDE main posts on record whose `post_published` landed on runs-service
- * (FACTORY-P2-CONTENT-OUTCOMES): what social-service measures (views, engagement)
- * and declares outcomes on, each consuming that `post_published`. Oldest first,
+ * FLEET-WIDE main posts on record whose outcome (the row's `outcomeKey`) landed on
+ * runs-service (FACTORY-P2-CONTENT-OUTCOMES): what social-service measures (views,
+ * engagement) and declares outcomes on, each consuming that outcome. Oldest first,
  * keyset on (published_at, id) so a reader pages without gaps.
  */
 export async function listMeasurablePosts(params: {

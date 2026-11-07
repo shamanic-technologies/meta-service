@@ -36,6 +36,13 @@
       "when": 1793985742000,
       "tag": "0004_threads_post_outcomes",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1794000000000,
+      "tag": "0005_relabel_post_published",
+      "breakpoints": true
     }
   ]
 }

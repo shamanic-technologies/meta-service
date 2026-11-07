@@ -950,15 +950,15 @@ export const ThreadsPublishSchema = z
       description:
         "Caller's own key, unique per org. The same key again answers the publication it already made (200, `replayed: true`) and never calls Threads twice. The same key with another account, text or parent post is a 409 `idempotency_key_reused`.",
     }),
-    outcomeKey: z.enum(["post_published", "threads_post_published"]).optional().openapi({
+    outcomeKey: z.enum(["threads_post_published"]).optional().openapi({
       description:
-        "The outcome a MAIN post declares on the caller's run. Default `post_published` (what the live Threads script declares today). `threads_post_published` = the Threads-specific outcome (OUTCOME-FINEST-1106), the one every imported post declares: a script opts in by sending it. Kept on the publication; a replay answers the stored one.",
+        "The outcome a MAIN post declares on the caller's run: `threads_post_published` (OUTCOME-FINEST-1106), also the default when absent. The retired coarse `post_published` is refused 400 `outcome_retired` (DELETE-POST-PUBLISHED-1107). Kept on the publication; a replay answers the stored one.",
     }),
   })
   .openapi("ThreadsPublish");
 
 const PublicationKindSchema = z.enum(["post", "reply"]).openapi({
-  description: "`post` = a main post (one `post_published` outcome); `reply` = a reply under a post (part of its thread, no outcome)",
+  description: "`post` = a main post (one `threads_post_published` outcome); `reply` = a reply under a post (part of its thread, no outcome)",
 });
 
 const ThreadsPublishResponseSchema = z
@@ -974,12 +974,12 @@ const ThreadsPublishResponseSchema = z
     replayed: z.boolean().openapi({ description: "true when the idempotency key had already published this: nothing was published again" }),
     outcome: z
       .object({
-        outcomeKey: z.enum(["post_published", "threads_post_published"]),
+        outcomeKey: z.enum(["threads_post_published"]),
         declared: z.boolean().openapi({ description: "false = runs-service refused or was unreachable; retried by the next call with the same idempotency key" }),
         error: z.string().nullable(),
       })
       .nullable()
-      .openapi({ description: "The outcome (`post_published` by default, `threads_post_published` when asked) declared on the caller's run (x-run-id), main posts only; null for a reply" }),
+      .openapi({ description: "The outcome (`threads_post_published`) declared on the caller's run (x-run-id), main posts only; null for a reply" }),
   })
   .openapi("ThreadsPublishResponse");
 
@@ -1026,7 +1026,7 @@ const ThreadsPublicationSchema = z
     linkTracking: z.string().nullable().openapi({ description: "tracked:<links> | no_own_link | brand_unreadable | too_long | root_unknown (null before 2026-10-29, and on an imported post)" }),
     origin: z.enum(["published", "imported"]).openapi({ description: "published = this service published it; imported = read off the connected account (published outside us, hand posts included)" }),
     performedBy: z.enum(["ours", "client_team"]).openapi({ description: "Who performed it: ours, or the client's own team (an imported post)" }),
-    outcomeKey: z.string().openapi({ description: "The outcome this main post declares: post_published | threads_post_published (every imported post)" }),
+    outcomeKey: z.string().openapi({ description: "The outcome this main post declares: threads_post_published (every main post, published or imported)" }),
     mediaType: z.string().nullable().openapi({ description: "Threads media_type of an imported post (TEXT_POST, IMAGE, VIDEO, CAROUSEL_ALBUM, AUDIO); null on a post we published (text)" }),
     publishedAt: z.string(),
   })
@@ -1152,7 +1152,7 @@ registry.registerPath({
   path: "/orgs/threads/accounts/{id}/posts",
   summary: "Publish a text post, or a reply under a post, on a connected Threads account (kept on record, idempotent on the caller's key)",
   description:
-    "Every publication is kept (account, brand, org, user, run, campaign, kind, parent post, text, permalink, time). A main post declares ONE `post_published` outcome on the caller's run (x-run-id), subject = the publication; a reply declares none. The Threads API is free: no cost.",
+    "Every publication is kept (account, brand, org, user, run, campaign, kind, parent post, text, permalink, time). A main post declares ONE `threads_post_published` outcome on the caller's run (x-run-id), subject = the publication; a reply declares none. The Threads API is free: no cost.",
   security: [{ serviceKeyAuth: [] }],
   request: {
     headers: ThreadsPublishHeadersSchema,
@@ -1210,7 +1210,7 @@ registry.registerPath({
   method: "get",
   path: "/internal/threads/measurable-posts",
   summary:
-    "Fleet-wide Threads MAIN posts whose outcome landed on runs-service, oldest first (keyset paged). `accountId`/`accountUsername` name the account the post is read through TODAY: the one that published it, or a later connection of the same Threads user (a rename + reconnect makes a new account row). Posts we published (outcome post_published or threads_post_published) AND posts imported from a connected account (threads_post_published, performedBy client_team). What social-service measures (views, engagement) and declares outcomes on (FACTORY-P2-CONTENT-OUTCOMES). A reader consuming the post's outcome consumes `outcomeKey`.",
+    "Fleet-wide Threads MAIN posts whose outcome landed on runs-service, oldest first (keyset paged). `accountId`/`accountUsername` name the account the post is read through TODAY: the one that published it, or a later connection of the same Threads user (a rename + reconnect makes a new account row). Posts we published AND posts imported from a connected account (threads_post_published, performedBy client_team). What social-service measures (views, engagement) and declares outcomes on (FACTORY-P2-CONTENT-OUTCOMES). A reader consuming the post's outcome consumes `outcomeKey`.",
   security: [{ serviceKeyAuth: [] }],
   request: {
     query: z.object({
@@ -1222,7 +1222,7 @@ registry.registerPath({
   },
   responses: {
     200: {
-      description: "Main posts with the org that owns them and when their post_published was declared",
+      description: "Main posts with the org that owns them and when their outcome was declared",
       content: {
         "application/json": {
           schema: z
