@@ -10,7 +10,7 @@
  *   subject = this row), declared on the caller's run (x-run-id). A reply is part
  *   of its thread and declares nothing. The Threads API is free: no cost.
  */
-import { and, asc, desc, eq, gte, isNotNull, lte, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, inArray, isNotNull, lte, sql, type SQL } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
   threadsAccounts,
@@ -339,6 +339,67 @@ export async function listMeasurablePosts(params: {
     .limit(params.limit);
 }
 
+/**
+ * The connected account each publication is read through (THREADS-OWN-REPLIES-1107): the row that
+ * published it, else a connection of the SAME Threads user in the same org. A Threads user renamed
+ * and reconnected (or disconnected then reconnected) gets a new account row; its posts stay its
+ * posts. Among several connections of that user: same brand first, then a connected one, then the
+ * newest. A publication with no connection of its Threads user left is absent from the map.
+ */
+export async function currentAccounts(rows: ThreadsPublication[]): Promise<Map<string, ThreadsAccount>> {
+  const out = new Map<string, ThreadsAccount>();
+  if (rows.length === 0) return out;
+  const userIds = [...new Set(rows.map((r) => r.threadsUserId))];
+  const accounts = await db.select().from(threadsAccounts).where(inArray(threadsAccounts.threadsUserId, userIds));
+  for (const row of rows) {
+    const exact = accounts.find((a) => a.id === row.accountId);
+    if (exact) {
+      out.set(row.id, exact);
+      continue;
+    }
+    const rank = (a: ThreadsAccount) => (a.brandId === row.brandId ? 2 : 0) + (a.status === "connected" ? 1 : 0);
+    const same = accounts
+      .filter((a) => a.orgId === row.orgId && a.threadsUserId === row.threadsUserId)
+      .sort((a, b) => rank(b) - rank(a) || b.createdAt.getTime() - a.createdAt.getTime());
+    if (same[0]) out.set(row.id, same[0]);
+  }
+  return out;
+}
+
+/**
+ * Per MAIN post: how many replies under its thread are OUR publications on record, published on the
+ * same Threads user (THREADS-OWN-REPLIES-1107). Threads' lifetime `replies` insight counts them
+ * (a chain of 3 replies we publish under a post reads `replies: 3`), so replies by others =
+ * metrics.replies − ownReplies. A count we hold: 0 is a real 0.
+ */
+export async function ownReplyCounts(posts: ThreadsPublication[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  const roots = posts.filter((p) => p.threadsPostId);
+  for (const p of posts) out.set(p.id, 0);
+  if (roots.length === 0) return out;
+  const counts = await db
+    .select({
+      orgId: threadsPublications.orgId,
+      threadsUserId: threadsPublications.threadsUserId,
+      root: threadsPublications.threadRootPostId,
+      n: count(),
+    })
+    .from(threadsPublications)
+    .where(
+      and(
+        eq(threadsPublications.kind, "reply"),
+        eq(threadsPublications.status, "published"),
+        inArray(threadsPublications.threadRootPostId, roots.map((p) => p.threadsPostId!)),
+      ),
+    )
+    .groupBy(threadsPublications.orgId, threadsPublications.threadsUserId, threadsPublications.threadRootPostId);
+  for (const p of roots) {
+    const hit = counts.find((c) => c.orgId === p.orgId && c.threadsUserId === p.threadsUserId && c.root === p.threadsPostId);
+    out.set(p.id, hit ? Number(hit.n) : 0);
+  }
+  return out;
+}
+
 export class PublicationNotMeasurableError extends Error {
   constructor(readonly publicationId: string, message: string) {
     super(message);
@@ -354,6 +415,8 @@ export class PublicationNotMeasurableError extends Error {
  */
 export async function publicationInsights(id: string): Promise<{
   publication: ThreadsPublication;
+  account: ThreadsAccount;
+  ownReplies: number;
   observedAt: string;
   insights: PostInsights;
   raw: unknown;
@@ -363,13 +426,14 @@ export async function publicationInsights(id: string): Promise<{
   if (publication.kind !== "post" || publication.status !== "published" || !publication.threadsPostId) {
     throw new PublicationNotMeasurableError(id, "Only a published MAIN post has insights of its own");
   }
-  const [account] = await db.select().from(threadsAccounts).where(eq(threadsAccounts.id, publication.accountId)).limit(1);
+  const account = (await currentAccounts([publication])).get(publication.id);
   if (!account) {
     throw new PublicationNotMeasurableError(id, `The Threads account that published it (@${publication.accountUsername}) is no longer connected`);
   }
   const observedAt = new Date().toISOString();
   const { insights, raw } = await readPostInsights({ account, postId: publication.threadsPostId, parentRunId: publication.runId });
-  return { publication, observedAt, insights, raw };
+  const ownReplies = (await ownReplyCounts([publication])).get(publication.id) ?? 0;
+  return { publication, account, ownReplies, observedAt, insights, raw };
 }
 
 export function serialisePublication(row: ThreadsPublication) {
