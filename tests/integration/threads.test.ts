@@ -597,6 +597,83 @@ describe("Measurable posts (social-service post metrics)", () => {
   });
 });
 
+describe("Own replies and replaced accounts (THREADS-OWN-REPLIES-1107)", () => {
+  const key = { "x-api-key": "test-service-key" };
+  const headers = () => ({ ...getAuthHeaders(), "x-run-id": "77777777-7777-7777-7777-777777777777", "x-brand-id": BRAND });
+  function numberedPosts(): Handler {
+    let n = 0;
+    const base = defaultThreads();
+    return (url, init) => {
+      if (/^\/v1\.0\/\d+\/threads_publish$/.test(url.pathname)) return { body: { id: `own-${++n}` } };
+      if (url.pathname.endsWith("/insights")) {
+        return { body: { data: [{ name: "views", values: [{ value: 9 }] }, { name: "replies", values: [{ value: 4 }] }] } };
+      }
+      return base(url, init);
+    };
+  }
+
+  it("a chain of 3 replies we publish under a main post reads ownReplies 3, at any depth; a post with none reads 0", async () => {
+    const { body } = await connect("code-alice");
+    await db.update(threadsAccounts).set({ scopes: ["threads_basic", "threads_manage_insights"] }).where(eq(threadsAccounts.id, body.account.id));
+    threadsHandler = numberedPosts();
+    const post = (text: string, replyToPostId?: string) =>
+      request(app).post(`/orgs/threads/accounts/${body.account.id}/posts`).set(headers()).send({ text, replyToPostId });
+    const main = await post("Main");
+    let parent = main.body.postId as string;
+    for (const t of ["R1", "R2", "R3"]) parent = (await post(t, parent)).body.postId;
+    const lonely = await post("Lonely");
+
+    const listed = await request(app).get("/internal/threads/measurable-posts").set(key);
+    const byText = Object.fromEntries(listed.body.posts.map((p: any) => [p.text, p]));
+    expect(byText.Main.ownReplies).toBe(3);
+    expect(byText.Lonely.ownReplies).toBe(0);
+
+    const read = await request(app).get(`/internal/threads/publications/${main.body.publicationId}/insights`).set(key);
+    expect(read.status).toBe(200);
+    // Threads' count stays as Threads gives it; ours sits beside it.
+    expect(read.body.metrics.replies).toBe(4);
+    expect(read.body.ownReplies).toBe(3);
+    expect(read.body.metrics.likes).toBeNull();
+    const none = await request(app).get(`/internal/threads/publications/${lonely.body.publicationId}/insights`).set(key);
+    expect(none.body.ownReplies).toBe(0);
+  });
+
+  it("a post whose account row was replaced by a reconnect of the same Threads user is read and listed through the new connection", async () => {
+    const first = await connect("code-alice");
+    threadsHandler = numberedPosts();
+    const main = await request(app).post(`/orgs/threads/accounts/${first.body.account.id}/posts`).set(headers()).send({ text: "Old handle" });
+    expect(main.status).toBe(201);
+    const removed = await request(app).delete(`/orgs/threads/accounts/${first.body.account.id}`).set(getAuthHeaders());
+    expect(removed.status).toBeLessThan(300);
+
+    // Gone and nothing else of that Threads user connected: still not measurable.
+    const gone = await request(app).get(`/internal/threads/publications/${main.body.publicationId}/insights`).set(key);
+    expect(gone.status).toBe(409);
+    expect(gone.body.reason).toBe("not_measurable");
+
+    // The same Threads user, renamed, connects again: a new row.
+    threadsHandler = defaultThreads();
+    const again = await connect("code-alice");
+    expect(again.body.account.id).not.toBe(first.body.account.id);
+    await db
+      .update(threadsAccounts)
+      .set({ username: "alice_renamed", scopes: ["threads_basic", "threads_manage_insights"] })
+      .where(eq(threadsAccounts.id, again.body.account.id));
+    threadsHandler = numberedPosts();
+
+    const read = await request(app).get(`/internal/threads/publications/${main.body.publicationId}/insights`).set(key);
+    expect(read.status).toBe(200);
+    expect(read.body).toMatchObject({ accountId: again.body.account.id, accountUsername: "alice_renamed" });
+    expect(read.body.metrics.views).toBe(9);
+    const insight = calls.filter((c) => c.url.pathname.endsWith("/insights")).at(-1)!;
+    expect(insight.url.searchParams.get("access_token")).toBe("long-1001");
+
+    const listed = await request(app).get("/internal/threads/measurable-posts").set(key);
+    const row = listed.body.posts.find((p: any) => p.id === main.body.publicationId);
+    expect(row).toMatchObject({ accountId: again.body.account.id, accountUsername: "alice_renamed" });
+  });
+});
+
 describe("Post insights (the Threads adapter of social-service's post metrics)", () => {
   async function publishedMain(scopes?: string[]) {
     const { body } = await connect("code-alice");
