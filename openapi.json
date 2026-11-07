@@ -1131,7 +1131,7 @@
               "post",
               "reply"
             ],
-            "description": "`post` = a main post (one `post_published` outcome); `reply` = a reply under a post (part of its thread, no outcome)"
+            "description": "`post` = a main post (one `threads_post_published` outcome); `reply` = a reply under a post (part of its thread, no outcome)"
           },
           "threadRootPostId": {
             "type": "string",
@@ -1151,7 +1151,6 @@
               "outcomeKey": {
                 "type": "string",
                 "enum": [
-                  "post_published",
                   "threads_post_published"
                 ]
               },
@@ -1169,7 +1168,7 @@
               "declared",
               "error"
             ],
-            "description": "The outcome (`post_published` by default, `threads_post_published` when asked) declared on the caller's run (x-run-id), main posts only; null for a reply"
+            "description": "The outcome (`threads_post_published`) declared on the caller's run (x-run-id), main posts only; null for a reply"
           }
         },
         "required": [
@@ -1208,10 +1207,9 @@
           "outcomeKey": {
             "type": "string",
             "enum": [
-              "post_published",
               "threads_post_published"
             ],
-            "description": "The outcome a MAIN post declares on the caller's run. Default `post_published` (what the live Threads script declares today). `threads_post_published` = the Threads-specific outcome (OUTCOME-FINEST-1106), the one every imported post declares: a script opts in by sending it. Kept on the publication; a replay answers the stored one."
+            "description": "The outcome a MAIN post declares on the caller's run: `threads_post_published` (OUTCOME-FINEST-1106), also the default when absent. The retired coarse `post_published` is refused 400 `outcome_retired` (DELETE-POST-PUBLISHED-1107). Kept on the publication; a replay answers the stored one."
           }
         },
         "required": [
@@ -1268,7 +1266,7 @@
               "post",
               "reply"
             ],
-            "description": "`post` = a main post (one `post_published` outcome); `reply` = a reply under a post (part of its thread, no outcome)"
+            "description": "`post` = a main post (one `threads_post_published` outcome); `reply` = a reply under a post (part of its thread, no outcome)"
           },
           "replyToPostId": {
             "type": "string",
@@ -1316,7 +1314,7 @@
           },
           "outcomeKey": {
             "type": "string",
-            "description": "The outcome this main post declares: post_published | threads_post_published (every imported post)"
+            "description": "The outcome this main post declares: threads_post_published (every main post, published or imported)"
           },
           "mediaType": {
             "type": "string",
@@ -3244,7 +3242,7 @@
     "/orgs/threads/accounts/{id}/posts": {
       "post": {
         "summary": "Publish a text post, or a reply under a post, on a connected Threads account (kept on record, idempotent on the caller's key)",
-        "description": "Every publication is kept (account, brand, org, user, run, campaign, kind, parent post, text, permalink, time). A main post declares ONE `post_published` outcome on the caller's run (x-run-id), subject = the publication; a reply declares none. The Threads API is free: no cost.",
+        "description": "Every publication is kept (account, brand, org, user, run, campaign, kind, parent post, text, permalink, time). A main post declares ONE `threads_post_published` outcome on the caller's run (x-run-id), subject = the publication; a reply declares none. The Threads API is free: no cost.",
         "security": [
           {
             "serviceKeyAuth": []
@@ -3498,7 +3496,7 @@
     },
     "/internal/threads/measurable-posts": {
       "get": {
-        "summary": "Fleet-wide Threads MAIN posts whose outcome landed on runs-service, oldest first (keyset paged). `accountId`/`accountUsername` name the account the post is read through TODAY: the one that published it, or a later connection of the same Threads user (a rename + reconnect makes a new account row). Posts we published (outcome post_published or threads_post_published) AND posts imported from a connected account (threads_post_published, performedBy client_team). What social-service measures (views, engagement) and declares outcomes on (FACTORY-P2-CONTENT-OUTCOMES). A reader consuming the post's outcome consumes `outcomeKey`.",
+        "summary": "Fleet-wide Threads MAIN posts whose outcome landed on runs-service, oldest first (keyset paged). `accountId`/`accountUsername` name the account the post is read through TODAY: the one that published it, or a later connection of the same Threads user (a rename + reconnect makes a new account row). Posts we published AND posts imported from a connected account (threads_post_published, performedBy client_team). What social-service measures (views, engagement) and declares outcomes on (FACTORY-P2-CONTENT-OUTCOMES). A reader consuming the post's outcome consumes `outcomeKey`.",
         "security": [
           {
             "serviceKeyAuth": []
@@ -3548,7 +3546,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Main posts with the org that owns them and when their post_published was declared",
+            "description": "Main posts with the org that owns them and when their outcome was declared",
             "content": {
               "application/json": {
                 "schema": {

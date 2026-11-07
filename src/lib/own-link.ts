@@ -3,7 +3,7 @@
  * and social-service: keep both in step.
  *
  * Every link to the publishing brand's OWN site in a post we publish carries the post's
- * `dy_post=<subjectService>:<subjectId>` (the subject of its `post_published` occurrence), so
+ * `dy_post=<subjectService>:<subjectId>` (the subject of its `threads_post_published` occurrence), so
  * lead-service credits the visit, and the signup that follows, to the run that published the post.
  * Deterministic and applied at publish time only: the writer's words are never touched, only a
  * link to the brand's domain (bare `distribute.you`, `www.`, `http(s)://`, any path) gets the

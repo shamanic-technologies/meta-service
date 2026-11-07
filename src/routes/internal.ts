@@ -58,7 +58,7 @@ router.post("/internal/threads/token-refresh", async (_req, res, next) => {
 });
 
 /**
- * Every main post on record whose post_published landed (FACTORY-P2-CONTENT-OUTCOMES),
+ * Every main post on record whose outcome landed (FACTORY-P2-CONTENT-OUTCOMES),
  * fleet-wide, for social-service's post metrics. Service key only: no org on the wire,
  * each row names its own org.
  */

@@ -404,9 +404,9 @@ export const threadsPublications = pgTable(
     origin: text("origin").notNull().default("published"),
     // Who performed it: ours | client_team (an imported post we did not publish).
     performedBy: text("performed_by").notNull().default("ours"),
-    // The outcome a MAIN post declares: post_published (the default of the publish route, what the
-    // live Threads script reads) | threads_post_published (imported posts, and a caller that opts in).
-    outcomeKey: text("outcome_key").notNull().default("post_published"),
+    // The outcome a MAIN post declares: threads_post_published (every main post, published or
+    // imported; the coarse post_published was retired and relabelled 2026-11-07, migration 0005).
+    outcomeKey: text("outcome_key").notNull().default("threads_post_published"),
     // The run the outcome is declared on when it is not `run_id` (an imported post: its own unit run,
     // child of the import run, dated at the post's own time).
     outcomeRunId: text("outcome_run_id"),
