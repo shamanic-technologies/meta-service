@@ -72,14 +72,14 @@ publishable server-side (`POST /orgs/threads/accounts/:id/posts`, text + optiona
   publish on it is a 409 `reason: needs_reconnect`, never a 500. The Threads API
   is free: publishing declares no cost.
 - **Every Threads publication is on record, idempotent, and a MAIN post is one
-  `post_published` outcome (THREADS-CAMPAIGN-1028).** `threads_publications`
+  `threads_post_published` outcome (THREADS-CAMPAIGN-1028).** `threads_publications`
   keeps each post/reply (account snapshot, the account's brand, org, user, run,
   `x-campaign-id`, kind `post|reply`, parent + thread root post, text, permalink,
   time). `idempotencyKey` (body, unique per org) is claimed by a `publishing` row
   BEFORE Threads is called: same key = the same publication answered (200,
   `replayed: true`), a key naming another account/text/parent or still in flight
   = 409 `idempotency_key_reused` / `publish_in_progress`; a Threads refusal frees
-  the key. A main post declares `post_published` (subject `meta-service` /
+  the key. A main post declares `threads_post_published` (subject `meta-service` /
   publication id) on the CALLER's run (`POST /v1/runs/{x-run-id}/outcomes`); a
   reply declares nothing (one thread = one outcome, billing counts it). A refused
   declaration never unpublishes: answered `outcome.declared: false`, logged
@@ -90,7 +90,7 @@ publishable server-side (`POST /orgs/threads/accounts/:id/posts`, text + optiona
   and spacing are the workflow's.
 - **What a post led to is measured in social-service, not here (FACTORY-P2-CONTENT-OUTCOMES).**
   Two service-key reads are its Threads adapter: `GET /internal/threads/measurable-posts`
-  (fleet-wide MAIN posts whose `post_published` landed, with org + publishing run, oldest
+  (fleet-wide MAIN posts whose outcome landed, `outcomeKey` = the row's, with org + publishing run, oldest
   first, keyset `afterPublishedAt`+`afterId`) and `GET /internal/threads/publications/:id/insights`
   (live lifetime views, likes, replies, reposts, quotes, shares; free; stores nothing; a metric
   Threads omits is null). social-service keeps the series and declares `post_viewed` /
@@ -111,9 +111,12 @@ publishable server-side (`POST /orgs/threads/accounts/:id/posts`, text + optiona
   connected, then newest), `accountId`/`accountUsername` on measurable-posts and the insights read =
   that account. No connection left = 409 `not_measurable`.
 - **The outcome is as fine as possible: `threads_post_published` (OUTCOME-FINEST-1106).** Every
-  imported post declares it; the publish route declares it when the body says
-  `outcomeKey: "threads_post_published"`, else `post_published` (what the live Threads script
-  declares, until its dynasty upgrades: never flip the default here). The step is a
+  main post declares it, imported or published, with or without `outcomeKey` in the body (this
+  service only publishes Threads, so it is the post's own outcome). The coarse `post_published` is
+  RETIRED fleet-wide (DELETE-POST-PUBLISHED-1107, owner 2026-11-07; supersedes "never flip the
+  default"): a body stating it is a 400 `outcome_retired`, and migration 0005 relabelled every stored
+  row (141 in prod: 37 posts + 104 replies), nothing deleted. Readers key on the row's `outcomeKey`,
+  never a hard-coded key. The step is a
   features-service catalogue row (declared 2026-11-06); a new key needs its row first, or runs-service
   400s `unknown_outcome_key`.
 - **A connected account imports EVERY own post, hand posts included (`src/lib/threads-import.ts`,

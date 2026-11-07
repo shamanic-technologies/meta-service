@@ -16,7 +16,9 @@ import {
   DEFAULT_WINDOW_DAYS,
   listPublications,
   publishAndRecord,
+  RETIRED_OUTCOME_KEYS,
   serialisePublication,
+  THREADS_POST_PUBLISHED,
 } from "../lib/threads-publications.js";
 import {
   completeConnect,
@@ -125,6 +127,15 @@ router.delete("/orgs/threads/accounts/:id", async (req, res, next) => {
 
 router.post("/orgs/threads/accounts/:id/posts", async (req, res, next) => {
   if (!UUID.test(req.params.id)) return notFound(res);
+  // The coarse post_published is retired fleet-wide (DELETE-POST-PUBLISHED-1107): a named refusal, never a silent relabel.
+  const asked = (req.body as { outcomeKey?: unknown } | undefined)?.outcomeKey;
+  if (typeof asked === "string" && (RETIRED_OUTCOME_KEYS as readonly string[]).includes(asked)) {
+    res.status(400).json({
+      error: "outcome_retired",
+      message: `Outcome ${asked} is retired: a Threads main post declares ${THREADS_POST_PUBLISHED} (send it, or send no outcomeKey)`,
+    });
+    return;
+  }
   const parsed = ThreadsPublishSchema.safeParse(req.body);
   if (!parsed.success) return invalid(res, parsed.error.flatten());
   try {

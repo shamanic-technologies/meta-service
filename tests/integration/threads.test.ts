@@ -509,7 +509,7 @@ describe("Threads publications on record", () => {
     expect(noFilter.status).toBe(400);
   });
 
-  it("a main post declares exactly one post_published on the caller's run; a reply none", async () => {
+  it("a main post with no outcome stated declares exactly one threads_post_published on the caller's run; a reply none", async () => {
     const { body } = await connect("code-alice");
     threadsHandler = countingThreads();
     const runId = "22222222-2222-2222-2222-222222222222";
@@ -522,9 +522,9 @@ describe("Threads publications on record", () => {
     expect(runsCalls[0].headers.get("x-org-id")).toBe("test-org-id");
     expect(runsCalls[0].headers.get("x-api-key")).toBe("test-runs-key");
     expect(runsCalls[0].body).toEqual({
-      produced: [{ outcomeKey: "post_published", subjectService: "meta-service", subjectId: main.body.publicationId }],
+      produced: [{ outcomeKey: "threads_post_published", subjectService: "meta-service", subjectId: main.body.publicationId }],
     });
-    expect(main.body.outcome).toEqual({ outcomeKey: "post_published", declared: true, error: null });
+    expect(main.body.outcome).toEqual({ outcomeKey: "threads_post_published", declared: true, error: null });
 
     const reply = await request(app)
       .post(`/orgs/threads/accounts/${body.account.id}/posts`)
@@ -559,7 +559,7 @@ describe("Threads publications on record", () => {
 });
 
 describe("Measurable posts (social-service post metrics)", () => {
-  it("lists fleet-wide main posts whose post_published landed, oldest first, keyset paged; replies and undeclared posts absent", async () => {
+  it("lists fleet-wide main posts whose outcome landed, oldest first, keyset paged; replies and undeclared posts absent", async () => {
     const { body } = await connect("code-alice");
     let n = 0;
     const base = defaultThreads();
@@ -887,7 +887,7 @@ describe("Threads-specific outcome + post import (OUTCOME-FINEST-1106)", () => {
     };
   }
 
-  it("a publication that opts in declares threads_post_published; the default stays post_published", async () => {
+  it("a publication stating threads_post_published declares it; the retired post_published is refused 400 outcome_retired", async () => {
     const { body } = await connect("code-alice");
     const runId = "77777777-7777-7777-7777-777777777777";
     const opted = await request(app)
@@ -908,6 +908,17 @@ describe("Threads-specific outcome + post import (OUTCOME-FINEST-1106)", () => {
       .set(getAuthHeaders())
       .send({ text: "Coarse family", outcomeKey: "x_post_published" });
     expect(bad.status).toBe(400);
+
+    const before = outcomeCalls().length;
+    const retired = await request(app)
+      .post(`/orgs/threads/accounts/${body.account.id}/posts`)
+      .set({ ...getAuthHeaders(), "x-run-id": runId })
+      .send({ text: "Coarse", outcomeKey: "post_published" });
+    expect(retired.status).toBe(400);
+    expect(retired.body.error).toBe("outcome_retired");
+    expect(outcomeCalls()).toHaveLength(before);
+    const coarseRows = await db.select().from(threadsPublications).where(eq(threadsPublications.text, "Coarse"));
+    expect(coarseRows).toEqual([]);
   });
 
   it("imports every own post not on record as client_team threads_post_published, on runs of the CONNECTING org", async () => {
@@ -961,9 +972,9 @@ describe("Threads-specific outcome + post import (OUTCOME-FINEST-1106)", () => {
       ],
       occurredAt: "2026-11-04T09:00:00.000Z",
     });
-    // Our own post kept its post_published and was not imported again.
+    // Our own post kept its threads_post_published and was not imported again.
     const [mine] = await db.select().from(threadsPublications).where(eq(threadsPublications.threadsPostId, "post-root"));
-    expect(mine).toMatchObject({ origin: "published", outcomeKey: "post_published", performedBy: "ours" });
+    expect(mine).toMatchObject({ origin: "published", outcomeKey: "threads_post_published", performedBy: "ours" });
     expect(runCloses.find((c) => c.id === importRun.id)!.body.status).toBe("completed");
 
     // A second pass imports nothing new and stops at the first known page.
