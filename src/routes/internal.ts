@@ -13,7 +13,7 @@ import { runReviewSync } from "../services/review-sync.js";
 import { runSpendIngest } from "../services/spend-ingest.js";
 import { runTokenRefresh } from "../lib/threads-accounts.js";
 import { runThreadsImport } from "../lib/threads-import.js";
-import { listMeasurablePosts, PublicationNotMeasurableError, publicationInsights, serialisePublication } from "../lib/threads-publications.js";
+import { currentAccounts, listMeasurablePosts, ownReplyCounts, PublicationNotMeasurableError, publicationInsights, serialisePublication } from "../lib/threads-publications.js";
 import { MeasurablePostsQuerySchema } from "../schemas.js";
 
 const router = Router();
@@ -75,9 +75,14 @@ router.get("/internal/threads/measurable-posts", async (req, res, next) => {
       after: afterPublishedAt && afterId ? { publishedAt: afterPublishedAt, id: afterId } : undefined,
       limit,
     });
+    const [accounts, ownReplies] = await Promise.all([currentAccounts(rows), ownReplyCounts(rows)]);
     res.json({
       posts: rows.map((r) => ({
         ...serialisePublication(r),
+        // The account it is read through today: a reconnect of the same Threads user replaces the row.
+        accountId: accounts.get(r.id)?.id ?? r.accountId,
+        accountUsername: accounts.get(r.id)?.username ?? r.accountUsername,
+        ownReplies: ownReplies.get(r.id)!,
         orgId: r.orgId,
         outcomeDeclaredAt: r.outcomeDeclaredAt!.toISOString(),
         outcomeRunId: r.outcomeRunId ?? r.runId,
@@ -109,7 +114,10 @@ router.get("/internal/threads/publications/:id/insights", async (req, res, next)
       publicationId: read.publication.id,
       postId: read.publication.threadsPostId,
       permalink: read.publication.permalink,
+      accountId: read.account.id,
+      accountUsername: read.account.username,
       observedAt: read.observedAt,
+      ownReplies: read.ownReplies,
       metrics: read.insights,
       raw: read.raw,
     });

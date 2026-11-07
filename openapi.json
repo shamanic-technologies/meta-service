@@ -1367,6 +1367,10 @@
                     "orgId": {
                       "type": "string"
                     },
+                    "ownReplies": {
+                      "type": "integer",
+                      "description": "Replies under this post that are OUR publications on record (same Threads user, any depth of the thread). Threads' `replies` insight counts them: replies by others = metrics.replies - ownReplies. 0 is a real 0."
+                    },
                     "outcomeDeclaredAt": {
                       "type": "string",
                       "description": "When the post's outcome (`outcomeKey`) landed on runs-service"
@@ -1378,6 +1382,7 @@
                   },
                   "required": [
                     "orgId",
+                    "ownReplies",
                     "outcomeDeclaredAt",
                     "outcomeRunId"
                   ]
@@ -1404,8 +1409,21 @@
             "type": "string",
             "nullable": true
           },
+          "accountId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The connected account the read ran on: the one that published it, or a later connection of the same Threads user"
+          },
+          "accountUsername": {
+            "type": "string",
+            "description": "That account's current Threads username"
+          },
           "observedAt": {
             "type": "string"
+          },
+          "ownReplies": {
+            "type": "integer",
+            "description": "Replies under this post that are OUR publications on record (same Threads user, any depth of the thread). Threads' `replies` insight counts them: replies by others = metrics.replies - ownReplies. 0 is a real 0."
           },
           "metrics": {
             "type": "object",
@@ -1453,7 +1471,10 @@
           "publicationId",
           "postId",
           "permalink",
+          "accountId",
+          "accountUsername",
           "observedAt",
+          "ownReplies",
           "metrics"
         ]
       }
@@ -3477,7 +3498,7 @@
     },
     "/internal/threads/measurable-posts": {
       "get": {
-        "summary": "Fleet-wide Threads MAIN posts whose outcome landed on runs-service, oldest first (keyset paged): posts we published (outcome post_published or threads_post_published) AND posts imported from a connected account (threads_post_published, performedBy client_team). What social-service measures (views, engagement) and declares outcomes on (FACTORY-P2-CONTENT-OUTCOMES). A reader consuming the post's outcome consumes `outcomeKey`.",
+        "summary": "Fleet-wide Threads MAIN posts whose outcome landed on runs-service, oldest first (keyset paged). `accountId`/`accountUsername` name the account the post is read through TODAY: the one that published it, or a later connection of the same Threads user (a rename + reconnect makes a new account row). Posts we published (outcome post_published or threads_post_published) AND posts imported from a connected account (threads_post_published, performedBy client_team). What social-service measures (views, engagement) and declares outcomes on (FACTORY-P2-CONTENT-OUTCOMES). A reader consuming the post's outcome consumes `outcomeKey`.",
         "security": [
           {
             "serviceKeyAuth": []
@@ -3551,7 +3572,7 @@
     },
     "/internal/threads/publications/{id}/insights": {
       "get": {
-        "summary": "Live lifetime insights of one Threads MAIN post (views, likes, replies, reposts, quotes, shares), read on the account that published it. Free, stores nothing: social-service keeps the series and declares post_viewed / post_engaged (FACTORY-P2-CONTENT-OUTCOMES).",
+        "summary": "Live lifetime insights of one Threads MAIN post (views, likes, replies, reposts, quotes, shares), read on the account that published it (or a later connection of the same Threads user). `ownReplies` = replies under it that we published, which Threads counts in `metrics.replies`. Free, stores nothing: social-service keeps the series and declares post_viewed / post_engaged (FACTORY-P2-CONTENT-OUTCOMES).",
         "security": [
           {
             "serviceKeyAuth": []

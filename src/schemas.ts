@@ -1210,7 +1210,7 @@ registry.registerPath({
   method: "get",
   path: "/internal/threads/measurable-posts",
   summary:
-    "Fleet-wide Threads MAIN posts whose outcome landed on runs-service, oldest first (keyset paged): posts we published (outcome post_published or threads_post_published) AND posts imported from a connected account (threads_post_published, performedBy client_team). What social-service measures (views, engagement) and declares outcomes on (FACTORY-P2-CONTENT-OUTCOMES). A reader consuming the post's outcome consumes `outcomeKey`.",
+    "Fleet-wide Threads MAIN posts whose outcome landed on runs-service, oldest first (keyset paged). `accountId`/`accountUsername` name the account the post is read through TODAY: the one that published it, or a later connection of the same Threads user (a rename + reconnect makes a new account row). Posts we published (outcome post_published or threads_post_published) AND posts imported from a connected account (threads_post_published, performedBy client_team). What social-service measures (views, engagement) and declares outcomes on (FACTORY-P2-CONTENT-OUTCOMES). A reader consuming the post's outcome consumes `outcomeKey`.",
   security: [{ serviceKeyAuth: [] }],
   request: {
     query: z.object({
@@ -1230,6 +1230,7 @@ registry.registerPath({
               posts: z.array(
                 ThreadsPublicationSchema.extend({
                   orgId: z.string(),
+                  ownReplies: z.number().int().openapi({ description: "Replies under this post that are OUR publications on record (same Threads user, any depth of the thread). Threads' `replies` insight counts them: replies by others = metrics.replies - ownReplies. 0 is a real 0." }),
                   outcomeDeclaredAt: z.string().openapi({ description: "When the post's outcome (`outcomeKey`) landed on runs-service" }),
                   outcomeRunId: z.string().openapi({ description: "The run that outcome is declared on: runId for a post we published, the post's own unit run (child of runId) for an imported one" }),
                 }),
@@ -1247,7 +1248,7 @@ registry.registerPath({
   method: "get",
   path: "/internal/threads/publications/{id}/insights",
   summary:
-    "Live lifetime insights of one Threads MAIN post (views, likes, replies, reposts, quotes, shares), read on the account that published it. Free, stores nothing: social-service keeps the series and declares post_viewed / post_engaged (FACTORY-P2-CONTENT-OUTCOMES).",
+    "Live lifetime insights of one Threads MAIN post (views, likes, replies, reposts, quotes, shares), read on the account that published it (or a later connection of the same Threads user). `ownReplies` = replies under it that we published, which Threads counts in `metrics.replies`. Free, stores nothing: social-service keeps the series and declares post_viewed / post_engaged (FACTORY-P2-CONTENT-OUTCOMES).",
   security: [{ serviceKeyAuth: [] }],
   request: { params: z.object({ id: z.string().uuid().openapi({ description: "Publication id (GET /internal/threads/measurable-posts)" }) }) },
   responses: {
@@ -1260,7 +1261,10 @@ registry.registerPath({
               publicationId: z.string().uuid(),
               postId: z.string(),
               permalink: z.string().nullable(),
+              accountId: z.string().uuid().openapi({ description: "The connected account the read ran on: the one that published it, or a later connection of the same Threads user" }),
+              accountUsername: z.string().openapi({ description: "That account's current Threads username" }),
               observedAt: z.string(),
+              ownReplies: z.number().int().openapi({ description: "Replies under this post that are OUR publications on record (same Threads user, any depth of the thread). Threads' `replies` insight counts them: replies by others = metrics.replies - ownReplies. 0 is a real 0." }),
               metrics: z.object({
                 views: z.number().nullable(),
                 likes: z.number().nullable(),

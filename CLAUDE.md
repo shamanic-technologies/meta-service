@@ -100,6 +100,16 @@ publishable server-side (`POST /orgs/threads/accounts/:id/posts`, text + optiona
   case, then reconnect). 409 reasons: `insights_scope_missing` (no Threads call),
   `insights_permission_missing` (Threads code 10, probed 2026-10-29 on our account),
   `needs_reconnect`, `not_measurable`.
+- **Threads' `replies` insight counts OUR replies; `ownReplies` says how many (THREADS-OWN-REPLIES-1107).**
+  A main post is published as a chain (post + replies we publish under it), and Threads' lifetime
+  `replies` counts every reply in the thread, ours included. measurable-posts and the insights read
+  serve `ownReplies` = our published replies on record with that `thread_root_post_id`, same Threads
+  user; replies by others = `metrics.replies − ownReplies`. `metrics.replies` stays Threads' number.
+- **A post is read through the CURRENT connection of its Threads user (`currentAccounts`).** A rename +
+  reconnect (or disconnect + reconnect) makes a new account row; a publication whose row is gone is
+  read and listed through a connection of the same Threads user in the same org (same brand, then
+  connected, then newest), `accountId`/`accountUsername` on measurable-posts and the insights read =
+  that account. No connection left = 409 `not_measurable`.
 - **The outcome is as fine as possible: `threads_post_published` (OUTCOME-FINEST-1106).** Every
   imported post declares it; the publish route declares it when the body says
   `outcomeKey: "threads_post_published"`, else `post_published` (what the live Threads script
