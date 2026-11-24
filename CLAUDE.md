@@ -34,6 +34,12 @@ receives a browser redirect. Each account carries the owner's account type
 publishable server-side (`POST /orgs/threads/accounts/:id/posts`, text + optional
 `replyToPostId`), and its long-lived token is refreshed by its own cron.
 
+**Instagram is NOT here (REELS-1124, 2026-11-24).** A brand's Instagram account, its Reels (`instagram_reel_published`)
+and their engagement live in **social-service** (`/orgs/instagram/*`, the shared `POST /orgs/social/accounts/:id/posts`,
+`post-metrics.ts`), through Instagram's own login (« Instagram API with Instagram Login », `graph.instagram.com`), like
+its X and LinkedIn accounts. The `instagram_basic` / `instagram_content_publish` scopes and `instagram_account_id` of the
+Connect path above are that older per-user Facebook login: no Reel is published through them, do not build on them.
+
 ## Invariants worth not relearning
 
 - **Ads are TEXT ONLY.** `createLinkCreative` sends `link_data` with no
