@@ -11,7 +11,16 @@ import {
   ThreadsConnectStartSchema,
   ThreadsPublishSchema,
   ThreadsPublicationsQuerySchema,
+  ThreadsPostPublishedUnitsQuerySchema,
 } from "../schemas.js";
+import {
+  InvalidCursorError,
+  UnitsQueryError,
+  listPostPublishedUnits,
+  parseUnitsQuery,
+  type UnitsFilters,
+} from "../lib/threads-units.js";
+import { THREADS_POST_PUBLISHED } from "../lib/threads-publications.js";
 import {
   DEFAULT_WINDOW_DAYS,
   listPublications,
@@ -177,6 +186,41 @@ router.get("/orgs/threads/publications", async (req, res, next) => {
     });
     res.json({ publications: rows.map(serialisePublication) });
   } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Provider read of our Units of `threads_post_published` (ENGINE-GET-ASK-1123): found by its
+ * OpenAPI tag, called as a script's run. The calling org's own records only; no Threads call.
+ */
+router.get("/orgs/units/threads-post-published", async (req, res, next) => {
+  const parsed = ThreadsPostPublishedUnitsQuerySchema.safeParse(req.query);
+  if (!parsed.success) return invalid(res, parsed.error.flatten());
+  let filters: UnitsFilters;
+  try {
+    filters = parseUnitsQuery(res.locals.orgId, parsed.data);
+  } catch (err) {
+    if (err instanceof InvalidCursorError) {
+      res.status(400).json({ error: "invalid_cursor", message: err.message });
+      return;
+    }
+    if (err instanceof UnitsQueryError) {
+      return invalid(res, { formErrors: [], fieldErrors: { [err.field]: [err.message] } });
+    }
+    return next(err);
+  }
+  try {
+    const page = await listPostPublishedUnits(filters);
+    res.json({
+      success: true,
+      outcome: THREADS_POST_PUBLISHED,
+      count: page.units.length,
+      units: page.units,
+      nextCursor: page.nextCursor,
+    });
+  } catch (err) {
+    // Fail loud: an empty page on a read failure would read as "nothing was ever posted".
     next(err);
   }
 });

@@ -485,7 +485,10 @@ const IdentityHeadersSchema = z.object({
 });
 
 const ThreadsPublishHeadersSchema = IdentityHeadersSchema.extend({
-  "x-campaign-id": z.string().optional().openapi({ description: "Campaign the publication is made for (kept on the record, read back by campaign)" }),
+  "x-campaign-id": z.string().optional().openapi({
+    description:
+      "The Campaign this publication is made for. Optional: omitted = a publication outside any Campaign. Kept on the record as `campaignId`, so the Campaign's publications and Units can be read back by it (`GET /orgs/threads/publications?campaignId=`, `GET /orgs/units/threads-post-published?campaignId=`).",
+  }),
   "x-brand-id": z.string().optional().openapi({ description: "Caller's brand (the record keeps the ACCOUNT's brand)" }),
 });
 
@@ -942,17 +945,21 @@ export const ThreadsAccountUpdateSchema = z
 
 export const ThreadsPublishSchema = z
   .object({
-    text: z.string().min(1).max(500).openapi({ description: "Post text, at most 500 characters (Threads' limit)" }),
+    text: z.string().min(1).max(500).openapi({
+      description:
+        "The words to publish, 1 to 500 characters (Threads' limit). Text only: no image, no video. Published as written, except that every link to the brand's own site gets a `dy_post` tracking parameter (the answer's record keeps both: `text` as asked, `publishedText` as Threads received it).",
+    }),
     replyToPostId: z.string().min(1).optional().openapi({
-      description: "Publish as a reply under this Threads post id (e.g. the postId a previous call returned)",
+      description:
+        "Omitted = a MAIN post (one Unit of `threads_post_published`). Given = a reply published under this Threads post id (the `postId` a previous call returned, to chain a thread): part of that thread, no outcome of its own.",
     }),
     idempotencyKey: z.string().min(1).max(512).optional().openapi({
       description:
-        "Caller's own key, unique per org. The same key again answers the publication it already made (200, `replayed: true`) and never calls Threads twice. The same key with another account, text or parent post is a 409 `idempotency_key_reused`.",
+        "Caller's own key for THIS publication, unique per org, at most 512 characters (e.g. `<run id>:<step>`). Optional, and strongly advised: without it a retry publishes the post a second time. The same key again answers the publication it already made (200, `replayed: true`) and never calls Threads twice. The same key with another account, text or parent post is a 409 `idempotency_key_reused`; while the first call is still running it is a 409 `publish_in_progress`. A publish Threads refused frees the key.",
     }),
     outcomeKey: z.enum(["threads_post_published"]).optional().openapi({
       description:
-        "The outcome a MAIN post declares on the caller's run: `threads_post_published` (OUTCOME-FINEST-1106), also the default when absent. The retired coarse `post_published` is refused 400 `outcome_retired` (DELETE-POST-PUBLISHED-1107). Kept on the publication; a replay answers the stored one.",
+        "The outcome a MAIN post declares on the caller's run (x-run-id). Only one value exists, `threads_post_published`, and it is also what an omitted `outcomeKey` means: leave it out. Any other value is a 400. Ignored for a reply (a reply declares no outcome).",
     }),
   })
   .openapi("ThreadsPublish");
@@ -1203,6 +1210,149 @@ registry.registerPath({
       },
     },
     400: threadsErrors[400],
+  },
+});
+
+// ─── Provider read of our Units (ENGINE-GET-ASK-1123) ───────────────────────
+// workflow-service finds this operation by its TAG (`provider:<outcome key>`) in
+// the served openapi.json and calls it for a script. Never rename the tag or the
+// operationId. Dates, lists and the cursor are normalised by `parseUnitsQuery`
+// (src/lib/threads-units.ts).
+
+const unitsList = (what: string) => z.union([z.string(), z.array(z.string())]).optional().openapi({ description: what });
+
+export const ThreadsPostPublishedUnitsQuerySchema = z
+  .object({
+    since: z.string().optional().openapi({
+      description:
+        "ISO 8601 datetime, INCLUSIVE lower bound on the Unit's `at` (when the post went live on Threads). A datetime without a zone is read as UTC. Omitted = since inception: old Units are included.",
+    }),
+    until: z.string().optional().openapi({
+      description: "ISO 8601 datetime, EXCLUSIVE upper bound on the Unit's `at`. Omitted = up to now.",
+    }),
+    brandId: z.string().min(1).optional().openapi({
+      description: "Only posts on this brand's Threads accounts. Omitted = every brand of the calling org.",
+    }),
+    campaignId: z.string().min(1).optional().openapi({
+      description:
+        "Only posts published for this Campaign (the `x-campaign-id` sent at publish). Omitted = every Campaign, and posts made outside any Campaign (imported posts carry none).",
+    }),
+    accountId: z.string().uuid().optional().openapi({
+      description:
+        "Only posts of this connected Threads account (OUR account id, a uuid, as listed by `GET /orgs/threads/accounts`). An account reconnected after a rename gets a new id: use `threadsUserId` to follow the same Threads user across reconnects.",
+    }),
+    threadsUserId: z.string().min(1).optional().openapi({
+      description: "Only posts of this Threads user (Threads' own numeric user id), whichever of our account rows published or imported them.",
+    }),
+    origin: z.enum(["published", "imported"]).optional().openapi({
+      description:
+        "`published` = we published the post through this service. `imported` = the post was read off the connected account (e.g. posted by hand by the client's team). Omitted = both.",
+    }),
+    publicationIds: unitsList(
+      "Only these Units, by `unitId` (our publication id, a uuid): comma-separated, or the parameter repeated; max 100. Use it to check Units you already know.",
+    ),
+    postIds: unitsList(
+      "Only the Units of these Threads posts, by Threads post id (`postId`): comma-separated, or the parameter repeated; max 100.",
+    ),
+    limit: z.coerce.number().int().min(1).max(500).optional().openapi({ description: "Page size, 1-500. Omitted = 100." }),
+    cursor: z.string().min(1).optional().openapi({
+      description: "The previous page's `nextCursor`, verbatim (opaque). Omitted = first page. Keep every other parameter the same from page to page.",
+    }),
+  })
+  .openapi("ThreadsPostPublishedUnitsQuery");
+
+const ThreadsPostPublishedUnitSchema = z
+  .object({
+    unitId: z.string().uuid().openapi({ description: "Stable id of this Unit at this Provider (our publication id)" }),
+    outcome: z.literal("threads_post_published"),
+    subject: z
+      .object({
+        service: z.literal("meta-service"),
+        id: z.string().uuid().openapi({ description: "The publication id (same as `unitId`)" }),
+      })
+      .openapi({ description: "The subject this Unit carries on runs-service's ledger, exactly as declared" }),
+    at: z.string().openapi({ description: "When the post went live on Threads (ISO 8601 UTC)" }),
+    madeBy: z
+      .object({
+        origin: z.enum(["published", "imported"]).openapi({
+          description: "`published` = we published it; `imported` = read off the connected account (published outside this service)",
+        }),
+        performedBy: z.enum(["ours", "client_team"]).openapi({
+          description: "`ours` = our system wrote and published it; `client_team` = someone on the client's team posted it by hand",
+        }),
+        runId: z.string().openapi({ description: "The run that published the post (or the import run that found it)" }),
+        outcomeRunId: z.string().openapi({
+          description: "The run the outcome is declared on: `runId` for a post we published, its own dated unit run for an imported post",
+        }),
+        userId: z.string().openapi({ description: "The user the publishing (or connecting) call was made for" }),
+      })
+      .openapi({ description: "Who made this Unit, and on which run" }),
+    declaredOnLedger: z.boolean().openapi({
+      description: "True when runs-service's ledger holds this Unit. False = the post is live but its declaration has not landed yet (it is retried)",
+    }),
+    declaredAt: z.string().nullable().openapi({ description: "When the declaration landed (ISO 8601 UTC). Null while `declaredOnLedger` is false" }),
+    brandId: z.string().openapi({ description: "The brand of the Threads account that carries the post" }),
+    campaignId: z.string().nullable().openapi({ description: "The Campaign the post was published for. Null outside any Campaign (every imported post)" }),
+    accountId: z.string().uuid().openapi({ description: "Our Threads account row that published or imported it" }),
+    accountUsername: z.string().openapi({ description: "That account's Threads username when the post was recorded" }),
+    threadsUserId: z.string().openapi({ description: "Threads' own id of the user who owns the post" }),
+    postId: z.string().openapi({ description: "Threads id of the post" }),
+    permalink: z.string().nullable().openapi({ description: "Public link to the post on Threads. Null when Threads returned none" }),
+    text: z.string().openapi({ description: "The post's words as Threads holds them" }),
+    mediaType: z.string().nullable().openapi({
+      description: "Threads media type of an imported post (TEXT_POST, IMAGE, VIDEO, CAROUSEL_ALBUM, AUDIO). Null on a post we published (always text)",
+    }),
+  })
+  .openapi("ThreadsPostPublishedUnit");
+
+const ThreadsPostPublishedUnitsResponseSchema = z
+  .object({
+    success: z.literal(true),
+    outcome: z.literal("threads_post_published"),
+    count: z.number().int().openapi({ description: "Units on THIS page" }),
+    units: z.array(ThreadsPostPublishedUnitSchema).openapi({ description: "Newest first. Empty when none exists." }),
+    nextCursor: z.string().nullable().openapi({ description: "Pass as `cursor` for the next page. Null = last page." }),
+  })
+  .openapi("ThreadsPostPublishedUnitsResponse");
+
+const UnitsErrorSchema = z
+  .object({
+    error: z.string().openapi({ description: "`Invalid request` (see `details`), or the code `invalid_cursor` (see `message`)" }),
+    details: z.unknown().optional().openapi({ description: "Per-field reasons for an invalid query" }),
+    message: z.string().optional(),
+  })
+  .openapi("UnitsError");
+
+registry.registerPath({
+  method: "get",
+  path: "/orgs/units/threads-post-published",
+  operationId: "listThreadsPostPublishedUnits",
+  tags: ["provider:threads_post_published"],
+  summary: "Units of `threads_post_published` that already exist for the calling org",
+  description:
+    "This service is the Provider of the outcome `threads_post_published`. A Unit = ONE Threads MAIN post that is live: published by us (`madeBy.origin` `published`) or imported from a connected account, hand posts by the client's team included (`imported`). A reply under a post is part of its thread and is not a Unit; a publish still in flight is not one yet.\n\n" +
+    "**Example.** What has this brand posted on Threads this week? `GET /orgs/units/threads-post-published?brandId=<brand>&since=2026-11-17T00:00:00Z`: `units[0].at` is the latest post, an empty `units` means none. Only what we published for one Campaign: `?campaignId=<campaign>&origin=published`.\n\n" +
+    "**Who.** Every filter is optional and they combine (AND): `brandId`, `campaignId`, `accountId`, `threadsUserId`, `origin`, or exact Units by `publicationIds` / `postIds`. No filter = every Unit of the org.\n\n" +
+    "**When.** `since` is yours to choose; omitted = since inception, so old Units are included. `until` is optional.\n\n" +
+    "**Scope.** The CALLING org only (`x-org-id`). Never another org's data.\n\n" +
+    "**Answer.** Newest first, paged by `cursor` (read until `nextCursor` is null). No Unit = 200 with an empty `units`, never a 404.\n\n" +
+    "**Cost.** None: it reads this service's own records, never calls Threads, publishes nothing, changes nothing.",
+  security: [{ serviceKeyAuth: [] }],
+  request: {
+    headers: IdentityHeadersSchema,
+    query: ThreadsPostPublishedUnitsQuerySchema,
+  },
+  responses: {
+    200: {
+      description: "One page of `threads_post_published` Units, newest first (possibly empty)",
+      content: { "application/json": { schema: ThreadsPostPublishedUnitsResponseSchema } },
+    },
+    400: {
+      description:
+        "Invalid query (`error: Invalid request`, `details` names the field), or a cursor this route did not issue (`error: invalid_cursor`)",
+      content: { "application/json": { schema: UnitsErrorSchema } },
+    },
+    401: { description: "Unauthorized" },
   },
 });
 
