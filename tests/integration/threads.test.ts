@@ -1050,3 +1050,239 @@ describe("Threads-specific outcome + post import (OUTCOME-FINEST-1106)", () => {
     expect(run.body).toMatchObject({ orgId: "test-org-id", userId: "test-user-id", brandId: BRAND });
   });
 });
+
+describe("Provider read of threads_post_published Units (ENGINE-GET-ASK-1123)", () => {
+  const PATH = "/orgs/units/threads-post-published";
+  const ACCOUNT_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const ACCOUNT_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const otherOrg = { ...getAuthHeaders(), "x-org-id": "other-org-id" };
+  const at = (day: number, hour = 12) => new Date(Date.UTC(2026, 10, day, hour));
+
+  /** A publication on record, written straight to the table: this read never touches Threads. */
+  async function seed(over: Partial<typeof threadsPublications.$inferInsert> & { threadsPostId: string }) {
+    const [row] = await db
+      .insert(threadsPublications)
+      .values({
+        orgId: "test-org-id",
+        brandId: BRAND,
+        accountId: ACCOUNT_A,
+        threadsUserId: "1001",
+        accountUsername: "alice_ai",
+        accountType: "pro_ai",
+        userId: "test-user-id",
+        runId: "run-publish",
+        campaignId: "camp-1",
+        kind: "post",
+        text: `words of ${over.threadsPostId}`,
+        status: "published",
+        permalink: `https://www.threads.net/@alice_ai/post/${over.threadsPostId}`,
+        threadRootPostId: over.threadsPostId,
+        publishedAt: at(10),
+        outcomeDeclaredAt: at(10, 13),
+        ...over,
+      })
+      .returning();
+    return row;
+  }
+
+  /** Five Units of the org (p1 oldest .. p5 newest) + everything that must never come back. */
+  async function seedAll() {
+    const p1 = await seed({ threadsPostId: "p1", publishedAt: at(1) });
+    const p2 = await seed({ threadsPostId: "p2", publishedAt: at(2), campaignId: "camp-2", publishedText: "words of p2 ?dy_post=x" });
+    const p3 = await seed({
+      threadsPostId: "p3",
+      publishedAt: at(3),
+      origin: "imported",
+      performedBy: "client_team",
+      campaignId: null,
+      runId: "run-import",
+      outcomeRunId: "run-unit-p3",
+      mediaType: "IMAGE",
+    });
+    const p4 = await seed({ threadsPostId: "p4", publishedAt: at(4), brandId: "brand-2", accountId: ACCOUNT_B, threadsUserId: "1002", accountUsername: "bob_human" });
+    const p5 = await seed({ threadsPostId: "p5", publishedAt: at(5), outcomeDeclaredAt: null });
+    const reply = await seed({ threadsPostId: "r1", publishedAt: at(5, 13), kind: "reply", replyToPostId: "p5", threadRootPostId: "p5", outcomeDeclaredAt: null });
+    const inFlight = await seed({ threadsPostId: "p-flight", status: "publishing", publishedAt: null, outcomeDeclaredAt: null });
+    const foreign = await seed({ threadsPostId: "p-foreign", orgId: "other-org-id", publishedAt: at(6) });
+    return { p1, p2, p3, p4, p5, reply, inFlight, foreign };
+  }
+
+  const read = (query: Record<string, string | string[] | number> = {}, headers = getAuthHeaders()) =>
+    request(app).get(PATH).query(query).set(headers);
+  const posts = (res: { body: { units: Array<{ postId: string }> } }) => res.body.units.map((u) => u.postId);
+
+  it("an org with nothing on record = 200 with no Unit, never a 404", async () => {
+    const res = await read();
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ success: true, outcome: "threads_post_published", count: 0, units: [], nextCursor: null });
+  });
+
+  it("serves the org's main posts newest first: no reply, no publish in flight, no other org's post", async () => {
+    await seedAll();
+    const res = await read();
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.outcome).toBe("threads_post_published");
+    expect(posts(res)).toEqual(["p5", "p4", "p3", "p2", "p1"]);
+    expect(res.body.count).toBe(5);
+    expect(res.body.nextCursor).toBeNull();
+
+    const theirs = await read({}, otherOrg);
+    expect(posts(theirs)).toEqual(["p-foreign"]);
+  });
+
+  it("each Unit names its ledger subject, who made it, and whether the ledger holds it", async () => {
+    const { p2, p3, p5 } = await seedAll();
+    const { body } = await read();
+    const unit = (id: string) => body.units.find((u: { unitId: string }) => u.unitId === id);
+
+    expect(unit(p2.id)).toEqual({
+      unitId: p2.id,
+      outcome: "threads_post_published",
+      subject: { service: "meta-service", id: p2.id },
+      at: at(2).toISOString(),
+      madeBy: { origin: "published", performedBy: "ours", runId: "run-publish", outcomeRunId: "run-publish", userId: "test-user-id" },
+      declaredOnLedger: true,
+      declaredAt: at(10, 13).toISOString(),
+      brandId: BRAND,
+      campaignId: "camp-2",
+      accountId: ACCOUNT_A,
+      accountUsername: "alice_ai",
+      threadsUserId: "1001",
+      postId: "p2",
+      permalink: "https://www.threads.net/@alice_ai/post/p2",
+      text: "words of p2 ?dy_post=x",
+      mediaType: null,
+    });
+    expect(unit(p3.id)).toMatchObject({
+      madeBy: { origin: "imported", performedBy: "client_team", runId: "run-import", outcomeRunId: "run-unit-p3" },
+      campaignId: null,
+      mediaType: "IMAGE",
+      text: "words of p3",
+    });
+    expect(unit(p5.id)).toMatchObject({ declaredOnLedger: false, declaredAt: null });
+  });
+
+  it("a Unit a real publish made is the subject declared on the ledger", async () => {
+    const { body } = await connect("code-alice");
+    const published = await request(app)
+      .post(`/orgs/threads/accounts/${body.account.id}/posts`)
+      .set({ ...getAuthHeaders(), "x-campaign-id": "camp-live" })
+      .send({ text: "Main post" });
+    expect(published.status).toBe(201);
+    await request(app)
+      .post(`/orgs/threads/accounts/${body.account.id}/posts`)
+      .set(getAuthHeaders())
+      .send({ text: "A reply", replyToPostId: published.body.postId });
+    const threadsCalls = calls.length;
+
+    const res = await read();
+    expect(res.body.count).toBe(1);
+    const [unit] = res.body.units;
+    expect(unit.unitId).toBe(published.body.publicationId);
+    expect(unit.campaignId).toBe("camp-live");
+    expect(unit.accountId).toBe(body.account.id);
+    expect(unit.declaredOnLedger).toBe(true);
+    const declared = runsCalls.find((c) => c.url.pathname.endsWith("/outcomes"))!.body;
+    expect(JSON.stringify(declared)).toContain(unit.subject.id);
+    expect(JSON.stringify(declared)).toContain(unit.subject.service);
+    // A read of our own records: Threads is never called.
+    expect(calls.length).toBe(threadsCalls);
+  });
+
+  it("since is inclusive, until exclusive, both optional", async () => {
+    await seedAll();
+    expect(posts(await read({ since: at(3).toISOString() }))).toEqual(["p5", "p4", "p3"]);
+    expect(posts(await read({ until: at(3).toISOString() }))).toEqual(["p2", "p1"]);
+    expect(posts(await read({ since: at(2).toISOString(), until: at(4).toISOString() }))).toEqual(["p3", "p2"]);
+    expect(posts(await read({ since: "2026-11-04T12:00:00" }))).toEqual(["p5", "p4"]);
+  });
+
+  it("filters by brand, campaign, account, Threads user and origin, combined with AND", async () => {
+    await seedAll();
+    expect(posts(await read({ brandId: "brand-2" }))).toEqual(["p4"]);
+    expect(posts(await read({ campaignId: "camp-1" }))).toEqual(["p5", "p4", "p1"]);
+    expect(posts(await read({ accountId: ACCOUNT_B }))).toEqual(["p4"]);
+    expect(posts(await read({ threadsUserId: "1001" }))).toEqual(["p5", "p3", "p2", "p1"]);
+    expect(posts(await read({ origin: "imported" }))).toEqual(["p3"]);
+    expect(posts(await read({ origin: "published" }))).toEqual(["p5", "p4", "p2", "p1"]);
+    expect(posts(await read({ campaignId: "camp-1", brandId: BRAND, origin: "published" }))).toEqual(["p5", "p1"]);
+    expect(posts(await read({ brandId: "brand-2", origin: "imported" }))).toEqual([]);
+  });
+
+  it("finds exact Units by publication id or Threads post id, comma-separated or repeated, in the org only", async () => {
+    const { p1, p3, reply, foreign } = await seedAll();
+    expect(posts(await read({ publicationIds: `${p1.id},${p3.id}` }))).toEqual(["p3", "p1"]);
+    expect(posts(await read({ publicationIds: [p1.id, p3.id] }))).toEqual(["p3", "p1"]);
+    expect(posts(await read({ postIds: "p2, p4" }))).toEqual(["p4", "p2"]);
+    expect(posts(await read({ postIds: ["p2", "p4"] }))).toEqual(["p4", "p2"]);
+    // A reply, another org's post and an unknown id are not Units of this org.
+    expect(posts(await read({ publicationIds: [reply.id, foreign.id, crypto.randomUUID()] }))).toEqual([]);
+    expect(posts(await read({ postIds: "r1,p-foreign,p-flight" }))).toEqual([]);
+  });
+
+  it("pages newest first with the cursor, no gap and no repeat, same-instant posts included", async () => {
+    await seedAll();
+    // Two more posts at the SAME instant as p3: the cursor's id breaks the tie.
+    await seed({ threadsPostId: "p3b", publishedAt: at(3) });
+    await seed({ threadsPostId: "p3c", publishedAt: at(3) });
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    let pages = 0;
+    do {
+      const res = await read({ limit: 2, ...(cursor ? { cursor } : {}) });
+      expect(res.status).toBe(200);
+      expect(res.body.count).toBe(res.body.units.length);
+      expect(res.body.count).toBeLessThanOrEqual(2);
+      seen.push(...posts(res));
+      cursor = res.body.nextCursor ?? undefined;
+      pages += 1;
+    } while (cursor && pages < 10);
+    expect(pages).toBe(4);
+    expect(seen).toHaveLength(7);
+    expect(new Set(seen)).toEqual(new Set(["p1", "p2", "p3", "p3b", "p3c", "p4", "p5"]));
+    expect(seen.slice(0, 2)).toEqual(["p5", "p4"]);
+    expect(seen.slice(5)).toEqual(["p2", "p1"]);
+
+    // A page that ends exactly on the last Unit announces no next page.
+    const exact = await read({ limit: 7 });
+    expect(exact.body.count).toBe(7);
+    expect(exact.body.nextCursor).toBeNull();
+    // The cursor composes with a filter.
+    const first = await read({ limit: 1, origin: "published", campaignId: "camp-1", brandId: BRAND });
+    expect(posts(first)).toEqual(["p5"]);
+    const rest = await read({ limit: 10, origin: "published", campaignId: "camp-1", brandId: BRAND, cursor: first.body.nextCursor });
+    expect(posts(rest)[2]).toBe("p1");
+    expect(rest.body.nextCursor).toBeNull();
+    expect(new Set(posts(rest))).toEqual(new Set(["p3b", "p3c", "p1"]));
+  });
+
+  it("an invalid query is a 400 that names the field; a foreign cursor is a 400 invalid_cursor", async () => {
+    const bad = async (query: Record<string, string | number>, field: string) => {
+      const res = await read(query);
+      expect(res.status, JSON.stringify(query)).toBe(400);
+      expect(res.body.error).toBe("Invalid request");
+      expect(res.body.details.fieldErrors[field]?.length, JSON.stringify(query)).toBeGreaterThan(0);
+    };
+    await bad({ limit: 0 }, "limit");
+    await bad({ limit: 501 }, "limit");
+    await bad({ origin: "hand" }, "origin");
+    await bad({ accountId: "not-a-uuid" }, "accountId");
+    await bad({ since: "yesterday" }, "since");
+    await bad({ until: "nope" }, "until");
+    await bad({ publicationIds: "not-a-uuid" }, "publicationIds");
+    await bad({ postIds: Array.from({ length: 101 }, (_, i) => `p${i}`).join(",") }, "postIds");
+
+    const res = await read({ cursor: "not-a-cursor" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("invalid_cursor");
+    expect(typeof res.body.message).toBe("string");
+  });
+
+  it("needs the service key and the org identity, like every /orgs route", async () => {
+    const { "x-api-key": _key, ...noKey } = getAuthHeaders();
+    expect((await request(app).get(PATH).set(noKey)).status).toBe(401);
+    const { "x-org-id": _org, ...noOrg } = getAuthHeaders();
+    expect((await request(app).get(PATH).set(noOrg)).status).toBe(400);
+  });
+});
