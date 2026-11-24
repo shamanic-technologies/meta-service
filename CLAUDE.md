@@ -88,6 +88,13 @@ publishable server-side (`POST /orgs/threads/accounts/:id/posts`, text + optiona
   default 30 days, newest first) is what a campaign workflow reads each run for
   spacing, rotation and subjects. No type gate and no queue here: account choice
   and spacing are the workflow's.
+- **Provider read of our Units: `GET /orgs/units/threads-post-published` (ENGINE-GET-ASK-1123).**
+  workflow-service finds it by its OpenAPI TAG `provider:threads_post_published` and calls it as a
+  script's run; never rename the tag or the `operationId` (`listThreadsPostPublishedUnits`). A Unit =
+  one published MAIN post of the calling org, ours or imported (no reply, no `publishing` row),
+  `subject` = the ledger's (`meta-service` / publication id). Since inception by default, newest
+  first, opaque keyset cursor; reads our table only (`src/lib/threads-units.ts`): no Threads call,
+  no cost, no write. A new outcome this service owns gets its own `provider:<key>` operation.
 - **What a post led to is measured in social-service, not here (FACTORY-P2-CONTENT-OUTCOMES).**
   Two service-key reads are its Threads adapter: `GET /internal/threads/measurable-posts`
   (fleet-wide MAIN posts whose outcome landed, `outcomeKey` = the row's, with org + publishing run, oldest
